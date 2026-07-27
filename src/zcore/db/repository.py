@@ -8,7 +8,7 @@ It supports dynamic pagination, eager load optimization, and field pruning.
 
 from pydantic import BaseModel
 from typing import TYPE_CHECKING, Generic, TypeVar, Type, Any, Sequence, Optional, List
-from sqlalchemy import select, inspect, Select
+from sqlalchemy import select, inspect, Select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.interfaces import ExecutableOption
 from sqlalchemy.orm import load_only
@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from zcore.db.search import SearchRequest
 
 ModelType = TypeVar("ModelType", bound=Base)
-CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
-UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
 class AbstractRepository(Generic[ModelType]):
@@ -51,67 +49,34 @@ class AbstractRepository(Generic[ModelType]):
     def _get_base_query(self) -> Select:
         """Construct the initial select statement for query operations.
 
+        Enforces context security by dynamically executing 'scope_query' 
+        if defined on the model layer.
+
         Returns:
             The base Select statement.
         """
-        return select(self.model)
-
-    def _extend_query(self, query: Select) -> Select:
-        """Apply additional clauses or modifications to the active query.
-
-        Args:
-            query: The active SQLAlchemy Select query statement.
-
-        Returns:
-            The modified Select statement.
-        """
+        query = select(self.model)
+        scoper = getattr(self.model, "scope_query", None)
+        if scoper:
+            return scoper(query)
         return query
 
-    async def get(
-        self, 
-        id: Any, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
-    ) -> Optional[ModelType]:
-        """Fetch a single record by its primary key identifier.
+    def _apply_filters(self, query: Select, *criterion: Any, **filters: Any) -> Select:
+        """Apply dynamic criteria and keyword filters onto the Select query.
 
         Args:
-            id: The primary key value of the targeted record.
-            fields: Specific entity fields to selectively load. If None, all attributes 
-                are loaded. Defaults to None.
-            options: Additional SQLAlchemy executable options (e.g., join-loads). 
-                Defaults to None.
+            query: The active SQLAlchemy Select query.
+            *criterion: Positional binary SQLAlchemy filter expressions.
+            **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
-            The retrieved model instance, or None if no matching record is found.
-
-        Raises:
-            NotImplementedError: Raised if the subclass does not implement this method.
+            The configured Select query.
         """
-        raise NotImplementedError
-
-    async def get_by_ids(
-        self, 
-        ids: List[Any], 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
-    ) -> Sequence[ModelType]:
-        """Fetch a sequence of records matching a list of primary keys.
-
-        Args:
-            ids: A list of primary key values to look up.
-            fields: Specific entity fields to selectively load. If None, all attributes 
-                are loaded. Defaults to None.
-            options: Additional SQLAlchemy executable options (e.g., join-loads). 
-                Defaults to None.
-
-        Returns:
-            A sequence of retrieved database model instances.
-
-        Raises:
-            NotImplementedError: Raised if the subclass does not implement this method.
-        """
-        raise NotImplementedError
+        if criterion:
+            query = query.where(*criterion)
+        if filters:
+            query = query.filter_by(**filters)
+        return query
 
 
 class ReadRepositoryMixin(AbstractRepository[ModelType]):
@@ -121,37 +86,41 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
     multi-key batch retrievals, and paginated listings.
     """
 
-    async def exist(self, id: Any) -> bool:
-        """Check if a record with the specified primary key exists in the database.
+    async def exist(self, *criterion: Any, **filters: Any) -> bool:
+        """Check if records matching the filters exist in the database.
 
         Args:
-            id: The primary key of the target record.
+            *criterion: Positional binary SQLAlchemy filter expressions.
+            **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
-            True if the record is found, False otherwise.
+            True if matching records are found, False otherwise.
         """
-        query = select(self.model.id).where(self.pk == id).limit(1)
+        query = select(self.pk)
+        query = self._apply_filters(query, *criterion, **filters).limit(1)
         result = await self.db.execute(query)
         return result.first() is not None
 
     async def get(
         self, 
-        id: Any, 
+        *criterion: Any, 
         fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
+        options: Optional[List[ExecutableOption]] = None,
+        **filters: Any
     ) -> Optional[ModelType]:
-        """Fetch a single record by its primary key.
+        """Fetch a single record by dynamic filters.
 
         Args:
-            id: The primary key of the target record.
+            *criterion: Positional binary SQLAlchemy filter expressions.
             fields: Specific entity fields to selectively load. Defaults to None.
-            options: Additional SQLAlchemy execution options. Defaults to None.
+            options: Additional SQLAlchemy executable options. Defaults to None.
+            **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
-            The retrieved model instance, or None if not found.
+            The retrieved model instance, or None if no matching record is found.
         """
-        query = self._get_base_query().where(self.pk == id)
-        query = self._extend_query(query)
+        query = self._get_base_query()
+        query = self._apply_filters(query, *criterion, **filters)
         if fields:
             query = query.options(load_only(*fields))
         if options:
@@ -165,25 +134,20 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         fields: Optional[List[Any]] = None, 
         options: Optional[List[ExecutableOption]] = None
     ) -> Sequence[ModelType]:
-        """Fetch a sequence of records matching the provided primary key list.
-
-        This method includes a fast path that returns an empty sequence directly 
-        if the requested `ids` parameter is empty, avoiding unnecessary database hits.
+        """Fetch a sequence of records matching a list of primary keys.
 
         Args:
-            ids: A list of target primary key values.
+            ids: A list of primary key values to look up.
             fields: Specific entity fields to selectively load. Defaults to None.
-            options: Additional SQLAlchemy execution options. Defaults to None.
+            options: Additional SQLAlchemy executable options. Defaults to None.
 
         Returns:
             A sequence of retrieved database model instances.
         """
-        # Fast path: Skip DB hit if empty list passed
         if not ids:
             return []
             
         query = self._get_base_query().where(self.pk.in_(ids))
-        query = self._extend_query(query)
         if fields:
             query = query.options(load_only(*fields))
         if options:
@@ -195,22 +159,24 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         self, 
         pagination: Any = None, 
         fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
+        options: Optional[List[ExecutableOption]] = None,
+        *criterion: Any,
+        **filters: Any
     ) -> Any:
-        """Fetch a paginated or complete list of records.
+        """Fetch a paginated or complete list of records matching filters.
 
         Args:
-            pagination: Pagination parameters. Supports CursorParams or standard page parameters.
-                If None, fetches the entire unfiltered result set. Defaults to None.
+            pagination: Pagination parameters. Defaults to None.
             fields: Specific entity fields to selectively load. Defaults to None.
             options: Additional SQLAlchemy execution options. Defaults to None.
+            *criterion: Positional binary SQLAlchemy filter expressions.
+            **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
-            A list of matching records, or a paginated response container containing 
-            items and metadata.
+            A list of matching records, or a paginated response container.
         """
         query = self._get_base_query()
-        query = self._extend_query(query)
+        query = self._apply_filters(query, *criterion, **filters)
         if fields:
             query = query.options(load_only(*fields))
         if options:
@@ -223,16 +189,28 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         paginator = CursorPagination(self.cursor_field) if isinstance(pagination, CursorParams) else PageNumberPagination()
         return await paginator.paginate(self.db, query, pagination, self.model)
 
+    async def count(self, *criterion: Any, **filters: Any) -> int:
+        """Count records matching dynamic criteria.
 
-class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType], AbstractRepository[ModelType]):
-    """Mixin implementing data modification and persistence operations.
+        Args:
+            *criterion: Positional binary SQLAlchemy filter expressions.
+            **filters: Keyword key-value arguments for standard equality filters.
 
-    Provides database writes, including single and multi-record insertions, dynamic
-    updates (with partial patch support), and single or multi-record deletions. Matches operations
-    with Unit of Work patterns by utilizing `flush` instead of direct `commit`.
-    """
+        Returns:
+            The total volume of matching records.
+        """
+        base_query = self._get_base_query()
+        query = self._apply_filters(base_query, *criterion, **filters)
+        query = query.order_by(None)
+        count_query = select(func.count()).select_from(query.subquery())
+        result = await self.db.execute(count_query)
+        return result.scalar_one()
 
-    async def create(self, schema: CreateSchemaType) -> ModelType:
+
+class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
+    """Mixin implementing data modification and persistence operations."""
+
+    async def create(self, schema: BaseModel) -> ModelType:
         """Create a new database record from a validated creation schema.
 
         Args:
@@ -247,7 +225,7 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
         await self.db.refresh(record)
         return record
 
-    async def create_multi(self, schemas: List[CreateSchemaType], refresh: bool = False) -> Sequence[ModelType]:
+    async def create_multi(self, schemas: List[BaseModel], refresh: bool = False) -> Sequence[ModelType]:
         """Create multiple database records from a list of validation schemas.
 
         Args:
@@ -269,7 +247,7 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
                 await self.db.refresh(record)
         return records
 
-    async def update(self, id: Any, schema: UpdateSchemaType, partial: bool = False) -> Optional[ModelType]:
+    async def update(self, id: Any, schema: BaseModel, partial: bool = False) -> Optional[ModelType]:
         """Update an existing database record.
 
         Args:
@@ -281,7 +259,7 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
         Returns:
             The updated and refreshed database model instance, or None if the record was not found.
         """
-        record = await self.get(id)
+        record = await self.get(**{self.pk_name: id})
         if not record:
             return None
         update_data = schema.model_dump(exclude_unset=partial)
@@ -293,7 +271,7 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
 
     async def update_multi(
         self, 
-        data: dict[Any, UpdateSchemaType], 
+        data: dict[Any, BaseModel], 
         partial: bool = False, 
         refresh: bool = False
     ) -> Sequence[ModelType]:
@@ -336,7 +314,7 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
         Returns:
             The deleted database model instance, or None if the record was not found.
         """
-        record = await self.get(id)
+        record = await self.get(**{self.pk_name: id})
         if not record:
             return None
         await self.db.delete(record)
@@ -363,22 +341,14 @@ class WriteRepositoryMixin(Generic[ModelType, CreateSchemaType, UpdateSchemaType
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
-    """Mixin coordinating structured application search operations.
-
-    Integrates with the framework search engine to generate queries with complex 
-    filter, sorting, and relation preloading patterns.
-    """
+    """Mixin coordinating structured application search operations."""
 
     async def search(self, search_in: "SearchRequest", pagination: Any = None) -> Any:
         """Search and filter database models dynamically.
 
-        Utilizes the system `SearchEngine` to parse filters, apply relation joins, 
-        and handle sorting rules, yielding either a plain sequence or paginated lists.
-
         Args:
             search_in: A SearchRequest parameter configuration representing constraints.
-            pagination: Pagination settings (CursorParams or standard page parameter mapping).
-                Defaults to None.
+            pagination: Pagination settings. Defaults to None.
 
         Returns:
             A paginated response object containing matches, or a complete list of 
@@ -388,7 +358,7 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
         engine = SearchEngine(self.model)
         base_query = self._get_base_query()
         query = engine.build_base_query(search_in, base_query=base_query)
-        query = self._extend_query(query)
+        query = self._apply_filters(query)
         if pagination is None:
             result = await self.db.execute(query)
             return result.scalars().all()
@@ -398,22 +368,15 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
 
 
 class BaseRepository(
-    Generic[ModelType, CreateSchemaType, UpdateSchemaType],
+    Generic[ModelType],
     ReadRepositoryMixin[ModelType],
-    WriteRepositoryMixin[ModelType, CreateSchemaType, UpdateSchemaType],
+    WriteRepositoryMixin[ModelType],
     SearchRepositoryMixin[ModelType]
 ):
-    """The default implementation combining Read, Write, and Search capabilities.
-
-    Integrates standard read, write, and dynamic query routines with default primary key 
-    inspection logic.
-    """
+    """The default implementation combining Read, Write, and Search capabilities."""
 
     def __init__(self, model: Type[ModelType], db: AsyncSession):
         """Initialize the BaseRepository.
-
-        Dynamically inspects the model schema definition to locate and map 
-        the primary key column and attributes automatically.
 
         Args:
             model: The SQLAlchemy declarative model class linked to this repository.
