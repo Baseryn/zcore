@@ -208,6 +208,13 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         dependencies = self.get_route_dependencies(route_key, action)
         return self._normalize_dependencies(dependencies)
 
+    def _sort_routes(self) -> None:
+        """Sort routes to place parameterized dynamic paths at the end of the routing table.
+
+        This avoids dynamic routes (e.g., /{id:uuid}) from shadowing static sibling endpoints (e.g., /search).
+        """
+        self.router.routes.sort(key=lambda r: "{" in r.path)
+
     def _register_routes(self) -> None:
         """Dynamically generate and bind endpoints to the APIRouter."""
         service_callable = self.service
@@ -215,8 +222,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
 
         if RouteKey.POST not in self.exclude:
             c_schema = self.create_schema
-            async def _create_endpoint(data_in: c_schema, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.create_endpoint(data_in, service_inst)
+            async def _create_endpoint(data_in: c_schema, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.create_endpoint(data_in, service_inst, **kwargs)
             
             self.router.add_api_route(
                 path="/",
@@ -229,11 +236,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             )
 
         if RouteKey.GET not in self.exclude:
-            async def _get_endpoint(id: uuid.UUID, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.get_endpoint(id, service_inst)
+            async def _get_endpoint(id: uuid.UUID, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.get_endpoint(id, service_inst, **kwargs)
 
             self.router.add_api_route(
-                path="/{id}",
+                path="/{id:uuid}",
                 endpoint=_get_endpoint,
                 methods=["GET"],
                 dependencies=self._get_route_dependencies(RouteKey.GET),
@@ -246,11 +253,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             if self.pagination_class:
                 params_class = self.pagination_class.params_class
                 
-                async def _get_all_endpoint(params: params_class = Depends(), service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                    return await self.get_all_endpoint(service_inst, params)
+                async def _get_all_endpoint(params: params_class = Depends(), service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                    return await self.get_all_endpoint(service_inst, params, **kwargs)
             else:
-                async def _get_all_endpoint(service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                    return await self.get_all_endpoint(service_inst)
+                async def _get_all_endpoint(service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                    return await self.get_all_endpoint(service_inst, **kwargs)
 
             self.router.add_api_route(
                 path="/",
@@ -263,8 +270,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             )
 
         if RouteKey.SEARCH not in self.exclude:
-            async def _search_endpoint(search_in: SearchRequest, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.search_endpoint(search_in, service_inst)
+            async def _search_endpoint(search_in: SearchRequest, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.search_endpoint(search_in, service_inst, **kwargs)
 
             self.router.add_api_route(
                 path="/search",
@@ -279,11 +286,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         if RouteKey.UPDATE not in self.exclude:
             u_schema = self.update_schema
             
-            async def _update_endpoint(id: uuid.UUID, data_in: u_schema, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.update_endpoint(id, data_in, service_inst)
+            async def _update_endpoint(id: uuid.UUID, data_in: u_schema, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.update_endpoint(id, data_in, service_inst, **kwargs)
 
             self.router.add_api_route(
-                path="/{id}",
+                path="/{id:uuid}",
                 endpoint=_update_endpoint,
                 methods=["PUT"],
                 dependencies=self._get_route_dependencies(RouteKey.UPDATE),
@@ -295,11 +302,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         if RouteKey.PATCH not in self.exclude:
             u_schema = self.update_schema
             
-            async def _patch_endpoint(id: uuid.UUID, data_in: u_schema, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.patch_endpoint(id, data_in, service_inst)
+            async def _patch_endpoint(id: uuid.UUID, data_in: u_schema, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.patch_endpoint(id, data_in, service_inst, **kwargs)
                 
             self.router.add_api_route(
-                path="/{id}",
+                path="/{id:uuid}",
                 endpoint=_patch_endpoint,
                 methods=["PATCH"],
                 dependencies=self._get_route_dependencies(RouteKey.PATCH),
@@ -309,11 +316,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             )
 
         if RouteKey.DELETE not in self.exclude:
-            async def _delete_endpoint(id: uuid.UUID, service_inst: BaseService = service_dependency) -> ResponseWrapper:
-                return await self.delete_endpoint(id, service_inst)
+            async def _delete_endpoint(id: uuid.UUID, service_inst: BaseService = service_dependency, **kwargs: Any) -> ResponseWrapper:
+                return await self.delete_endpoint(id, service_inst, **kwargs)
 
             self.router.add_api_route(
-                path="/{id}",
+                path="/{id:uuid}",
                 endpoint=_delete_endpoint,
                 methods=["DELETE"],
                 dependencies=self._get_route_dependencies(RouteKey.DELETE),
@@ -322,12 +329,15 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 openapi_extra=self._get_openapi_extra(RouteKey.DELETE)
             )
             
-    async def create_endpoint(self, data_in: CreateSchemaType, service: BaseService) -> ResponseWrapper:
+        self._sort_routes()
+            
+    async def create_endpoint(self, data_in: CreateSchemaType, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute the POST creation transaction.
 
         Args:
             data_in: Validated input schema containing creation properties.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The created entity wrapped in a ResponseWrapper.
@@ -335,25 +345,27 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         data = await service.create(data_in)
         return ResponseWrapper(data=data)
     
-    async def get_endpoint(self, id: uuid.UUID, service: BaseService) -> ResponseWrapper:
+    async def get_endpoint(self, id: uuid.UUID, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute a single-record query lookup.
 
         Args:
             id: The primary key of the target entity.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The resolved model record wrapped in a ResponseWrapper.
         """
-        data = await service.get(id)
+        data = await service.get(id=id)
         return ResponseWrapper(data=data)
     
-    async def get_all_endpoint(self, service: BaseService, pagination: Any = None) -> ResponseWrapper:
+    async def get_all_endpoint(self, service: BaseService, pagination: Any = None, **kwargs: Any) -> ResponseWrapper:
         """Execute batch query listings, applying optional page boundaries.
 
         Args:
             service: Active business service instance.
             pagination: Optional offset or keyset cursor parameters. Defaults to None.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The list of resolved model records wrapped in a ResponseWrapper.
@@ -364,12 +376,13 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             return ResponseWrapper(data=result.data, meta=result.meta)
         return ResponseWrapper(data=result)
     
-    async def search_endpoint(self, search_in: SearchRequest, service: BaseService) -> ResponseWrapper:
+    async def search_endpoint(self, search_in: SearchRequest, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute dynamic filter searches, applying mapped page limits.
 
         Args:
             search_in: Target filtering limits request parameters.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The matching model records wrapped in a ResponseWrapper.
@@ -388,13 +401,14 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             return ResponseWrapper(data=result.data, meta=result.meta)
         return ResponseWrapper(data=result)
     
-    async def update_endpoint(self, id: uuid.UUID, data_in: UpdateSchemaType, service: BaseService) -> ResponseWrapper:
+    async def update_endpoint(self, id: uuid.UUID, data_in: UpdateSchemaType, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute a full-record entity update transaction.
 
         Args:
             id: Target entity identifier to update.
             data_in: Validated schema containing updated properties.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The updated model record wrapped in a ResponseWrapper.
@@ -402,13 +416,14 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         data = await service.update(id, data_in)
         return ResponseWrapper(data=data)
     
-    async def patch_endpoint(self, id: uuid.UUID, data_in: UpdateSchemaType, service: BaseService) -> ResponseWrapper:
+    async def patch_endpoint(self, id: uuid.UUID, data_in: UpdateSchemaType, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute a partial record update (PATCH) transaction.
 
         Args:
             id: Target entity identifier to patch.
             data_in: Validated schema containing partial changes.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             The updated model record wrapped in a ResponseWrapper.
@@ -416,12 +431,13 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         data = await service.update(id, data_in, partial=True)
         return ResponseWrapper(data=data)
     
-    async def delete_endpoint(self, id: uuid.UUID, service: BaseService) -> ResponseWrapper:
+    async def delete_endpoint(self, id: uuid.UUID, service: BaseService, **kwargs: Any) -> ResponseWrapper:
         """Execute a single-record delete transaction.
 
         Args:
             id: Target entity identifier to delete.
             service: Active business service instance.
+            **kwargs: Extra dynamic route arguments.
 
         Returns:
             A success response wrapped in a ResponseWrapper.

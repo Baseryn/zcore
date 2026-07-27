@@ -113,6 +113,16 @@ class ZCoreAPIRoute(APIRoute):
         async def custom_route_handler(request: Request) -> Response:
             zcore_request = ZCoreRequest(request.scope, request._receive)
             
+            method_action_map = {
+                "post": "create",
+                "get": "view",
+                "put": "update",
+                "patch": "patch",
+                "delete": "delete"
+            }
+            current_method = request.method.lower()
+            ctx.set("action", method_action_map.get(current_method, current_method))
+            
             if self.expose_schema and zcore_request.query_params.get("schema") == "true":
                 if not self.target_model:
                     return JSONResponse(

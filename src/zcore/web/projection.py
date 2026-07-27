@@ -28,15 +28,27 @@ class Zchema(BaseModel):
         if not model_name:
             return set()
 
-        prefix = f"{model_name}."
+        action = ctx.get("action")
         restricted = ctx.restricted_fields
         relative_paths = set()
         
+        action_prefix = f"{model_name}.{action}." if action else None
+        global_prefix = f"{model_name}."
+
         for path in restricted:
-            if path.startswith(prefix):
-                relative_paths.add(path[len(prefix):])
+            if action_prefix and path.startswith(action_prefix):
+                relative_paths.add(path[len(action_prefix):])
+            elif action and path == f"{model_name}.{action}":
+                relative_paths.add("*")
+            elif path.startswith(global_prefix):
+                remaining = path[len(global_prefix):]
+                parts = remaining.split(".", 1)
+                if action and parts[0] == action:
+                    continue
+                relative_paths.add(remaining)
             elif path == model_name:
                 relative_paths.add("*")
+
         return relative_paths
 
     @classmethod
