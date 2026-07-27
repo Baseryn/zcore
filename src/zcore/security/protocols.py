@@ -24,12 +24,3 @@ class UserProtocol(Protocol):
     id: uuid.UUID
     is_active: bool
     is_superuser: bool
-    
-    @property
-    def all_scopes(self) -> set[str]:
-        """Retrieve the compiled set of security scopes granted to this user.
-
-        Returns:
-            A set of unique scope key strings.
-        """
-        ...
