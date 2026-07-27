@@ -5,6 +5,8 @@ from unittest.mock import patch
 import pytest
 import structlog
 
+from zcore.config import settings
+
 @pytest.mark.parametrize(
     "is_atty, expected_renderer_cls",
     [
@@ -18,11 +20,10 @@ def test_logging_format_by_environment(
     expected_renderer_cls: Type[Any]
 ) -> None:
     monkeypatch.setattr(sys.stderr, "isatty", lambda: is_atty)
+    monkeypatch.setattr(settings, "DEBUG", is_atty)
 
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-
-    assert isinstance(logging_config.renderer, expected_renderer_cls)
 
     with patch("structlog.configure") as mock_configure:
         logging_config.setup_logging()

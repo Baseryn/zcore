@@ -29,6 +29,7 @@ def test_ttllru_eviction_and_cleanup(
 ) -> None:
     current_time = 1000.0
     monkeypatch.setattr("time.time", lambda: current_time)
+    monkeypatch.setattr("zcore.cache.ttllru_cache.time.time", lambda: current_time)
 
     cache = TTLLRUCache(maxsize=10)
     cache.set("a", "value_a", ttl=ttl_a)

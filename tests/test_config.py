@@ -2,7 +2,7 @@ import os
 from typing import Any
 import pytest
 
-from zcore.config import ZCoreCoreSettings, get_settings, initialize_settings, settings
+from zcore.config import Settings, get_settings, initialize_settings, settings
 from zcore.kernel.di import container
 
 @pytest.mark.parametrize(
@@ -36,10 +36,10 @@ def test_settings_environmental_loading(
 def test_settings_proxy_resolution(secret_a: str, secret_b: str) -> None:
     container._singletons.clear()
 
-    settings_a = ZCoreCoreSettings(SECRET_KEY=secret_a)
+    settings_a = Settings(SECRET_KEY=secret_a)
     initialize_settings(settings_a)
     assert settings.SECRET_KEY == secret_a
 
-    settings_b = ZCoreCoreSettings(SECRET_KEY=secret_b)
+    settings_b = Settings(SECRET_KEY=secret_b)
     initialize_settings(settings_b)
     assert settings.SECRET_KEY == secret_b

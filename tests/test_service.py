@@ -19,7 +19,7 @@ class ServiceTestCreateSchema(BaseModel):
 class ServiceTestUpdateSchema(BaseModel):
     name: str
 
-class HookTrackingService(BaseService[ServiceTestModel, ServiceTestCreateSchema, ServiceTestUpdateSchema]):
+class HookTrackingService(BaseService[ServiceTestModel]):
     def __init__(self, model: Type[ServiceTestModel], repository: Any) -> None:
         super().__init__(model, repository)
         self.hooks_called: list[str] = []

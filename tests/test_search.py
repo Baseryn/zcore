@@ -37,8 +37,11 @@ class SearchComment(Base):
     post = relationship("SearchPost")
 
 @pytest.fixture(autouse=True)
-def mock_restricted_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("zcore.db.search.get_restricted_fields", lambda: {"password", "SearchUser.password"})
+def mock_restricted_fields() -> Generator[None, None, None]:
+    from zcore.context.context import ctx
+    ctx.restricted_fields = {"password", "SearchUser.password"}
+    yield
+    ctx.restricted_fields = None
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_search_tables(test_engine: Any) -> AsyncGenerator[None, None]:

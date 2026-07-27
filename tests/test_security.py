@@ -4,9 +4,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from zcore.config import settings
-from zcore.exceptions.base import AuthError, ForbiddenError
-from zcore.security.hashing import get_password_hash, verify_password
-from zcore.security.jwt import _get_signing_keys, create_token, decode_token
+from zcore.exceptions import AuthError, ForbiddenError
+from zcore.security.security import Security
 from zcore.security.permissions import HasScopes
 
 class MockUser:
@@ -14,11 +13,7 @@ class MockUser:
         self.id = user_id
         self.is_active = is_active
         self.is_superuser = is_superuser
-        self._scopes = scopes
-
-    @property
-    def all_scopes(self) -> set[str]:
-        return self._scopes
+        self.scopes = scopes
 
 @pytest.mark.parametrize(
     "plain_pwd, candidate_pwd, is_match",
@@ -28,10 +23,10 @@ class MockUser:
     ]
 )
 def test_argon2_hashing(plain_pwd: str, candidate_pwd: str, is_match: bool) -> None:
-    hashed = get_password_hash(plain_pwd)
-    assert verify_password(candidate_pwd, hashed) is is_match
-    assert verify_password(plain_pwd, "invalid_hash_structure") is False
-    assert verify_password(plain_pwd, "$argon2id$v=19$m=65536,t=3,p=4$corruptpayload") is False
+    hashed = Security.hash_password(plain_pwd)
+    assert Security.verify_password(candidate_pwd, hashed) is is_match
+    assert Security.verify_password(plain_pwd, "invalid_hash_structure") is False
+    assert Security.verify_password(plain_pwd, "$argon2id$v=19$m=65536,t=3,p=4$corruptpayload") is False
 
 @pytest.mark.parametrize(
     "payload",
@@ -40,17 +35,17 @@ def test_argon2_hashing(plain_pwd: str, candidate_pwd: str, is_match: bool) -> N
     ]
 )
 def test_jwt_symmetric_flow(payload: dict[str, Any]) -> None:
-    token = create_token(payload)
-    decoded = decode_token(token)
+    token = Security.create_jwt(payload)
+    decoded = Security.decode_jwt(token)
     assert decoded["sub"] == payload["sub"]
     assert decoded["scopes"] == payload["scopes"]
     assert "exp" in decoded
 
 def test_jwt_production_safety_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "DEBUG", False)
     monkeypatch.setattr(settings, "SECRET_KEY", "zcore-insecure-fallback-secret-key-must-be-changed")
     with pytest.raises(RuntimeError) as exc_info:
-        _get_signing_keys()
+        Security._get_signing_keys()
     assert "FATAL SECURITY VIOLATION" in str(exc_info.value)
 
 @pytest.mark.anyio

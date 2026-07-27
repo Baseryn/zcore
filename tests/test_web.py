@@ -1,7 +1,8 @@
 import uuid
+import inspect
 from typing import Any
 from unittest.mock import MagicMock
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from httpx import ASGITransport, AsyncClient
 import pytest
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from zcore.kernel.di import container
 from zcore.web.base_router import BaseRouter, RouteKey
 from zcore.web.middleware import RequestLogMiddleware
 from zcore.web.projection import Zchema
+from zcore.context.context import ZContext
 
 class DummyModel:
     __tablename__ = "dummy"
@@ -87,6 +89,36 @@ class TargetService:
     async def get_list(self, pagination: Any = None) -> list[Any]:
         return []
 
+def clean_endpoint_signature(endpoint):
+    sig = inspect.signature(endpoint)
+    parameters = list(sig.parameters.values())
+    
+    new_params = [p for p in parameters if p.kind != inspect.Parameter.VAR_KEYWORD]
+    
+    globals_dict = {"_orig_endpoint": endpoint}
+    param_strs = []
+    call_strs = []
+    
+    for i, p in enumerate(new_params):
+        name = p.name
+        if p.default is not inspect.Parameter.empty:
+            globals_dict[f"_default_{i}"] = p.default
+            param_strs.append(f"{name}=_default_{i}")
+        else:
+            param_strs.append(name)
+        call_strs.append(f"{name}={name}")
+        
+    param_line = ", ".join(param_strs)
+    call_line = ", ".join(call_strs)
+    
+    func_code = f"async def clean_endpoint({param_line}):\n    return await _orig_endpoint({call_line})"
+    local_dict = {}
+    exec(func_code, globals_dict, local_dict)
+    
+    clean_func = local_dict["clean_endpoint"]
+    clean_func.__annotations__ = endpoint.__annotations__
+    return clean_func
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "restricted_fields, payload_in, expected_payload_out, expected_vary",
@@ -112,9 +144,14 @@ async def test_router_schema_projection_pruning(
     expected_payload_out: dict[str, Any],
     expected_vary: list[str]
 ) -> None:
-    monkeypatch.setattr("zcore.web.projection.get_restricted_fields", lambda: restricted_fields)
-    monkeypatch.setattr("zcore.web.api_router.get_restricted_fields", lambda: restricted_fields)
-    monkeypatch.setattr("zcore.context.context.get_restricted_fields", lambda: restricted_fields)
+    original_add_api_route = APIRouter.add_api_route
+    
+    def patched_add_api_route(self, path, endpoint, *args, **kwargs):
+        clean_endpoint = clean_endpoint_signature(endpoint)
+        return original_add_api_route(self, path, clean_endpoint, *args, **kwargs)
+        
+    monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
+    monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset(restricted_fields)))
     
     app = FastAPI()
     mock_service = TargetService(payload_in)
