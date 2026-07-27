@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from zcore.web.projection import Zchema
     from zcore.context.context import ctx, ZContext
     from zcore.security.security import Security
+    from zcore.security.auth import BaseAuth
 
 __all__ = [
     'Inject',
@@ -37,8 +38,9 @@ __all__ = [
     'Zchema',
     'Plugin',
     'ctx',
-    "ZContext",
-    "Security"
+    'ZContext',
+    'Security',
+    'BaseAuth'
 ]
 
 
@@ -103,5 +105,8 @@ def __getattr__(name: str) -> Any:
     if name == "Security":
         from zcore.security.security import Security
         return Security
+    if name == "BaseAuth":
+        from zcore.security.auth import BaseAuth
+        return BaseAuth
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
