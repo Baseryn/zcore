@@ -258,13 +258,21 @@ class Injector:
         return container.resolve(self.interface)
 
 
-def Inject(interface: Type[T]) -> Any:
-    """Convenience wrapper creating a FastAPI injection dependency parameter.
+class Inject:
+    """Dynamic type marker supporting unified Annotated dependency injection.
 
-    Args:
-        interface: The target type interface dependency to inject.
-
-    Returns:
-        A FastAPI Dependency representation linked to the active container.
+    Allows elegant type annotations in FastAPI routers, e.g., `service: Inject[UserService]`.
+    Under the hood, this converts the parameter metadata using `Annotated` and 
+    binds it to the IoC container's resolver.
     """
-    return Depends(Injector(interface))
+
+    def __class_getitem__(cls, interface: Type[T]) -> Any:
+        """Map the class generic bracket access to an Annotated dependency representation.
+
+        Args:
+            interface: The target type interface dependency to resolve.
+
+        Returns:
+            An Annotated type wrapper containing the resolved target class.
+        """
+        return Annotated[interface, Depends(Injector(interface))]

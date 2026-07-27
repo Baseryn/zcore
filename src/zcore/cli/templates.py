@@ -17,7 +17,7 @@ db_manager.init_app(
     db_url=settings.DATABASE_URL,
     pool_size=settings.POOL_SIZE,
     max_overflow=settings.MAX_OVERFLOW,
-    echo=(settings.ENVIRONMENT == "development")
+    echo=(settings.DEBUG)
 )
 
 # Initialize ZCore Kernel & Plugins
@@ -45,12 +45,12 @@ async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
-        "environment": settings.ENVIRONMENT
+        "debug": settings.DEBUG
     }
 """
 
 ENV_TEMPLATE = """PYTHONPATH=.
-ENVIRONMENT=development
+DEBUG=True
 PROJECT_NAME="{project_name}"
 DATABASE_URL=sqlite+aiosqlite:///zcore_dev.db
 SECRET_KEY="{secret_key}"
@@ -156,13 +156,13 @@ class {ModelName}Repository(BaseRepository[{ModelName}, {ModelName}Create, {Mode
         super().__init__(model={ModelName}, db=db)
 """
 
-SERVICE_TEMPLATE = """from zcore import BaseService, Inject
+SERVICE_TEMPLATE = """from zcore import BaseService
 from .models import {ModelName}
 from .schemas import {ModelName}Create, {ModelName}Update
 from .repositories import {ModelName}Repository
 
 class {ModelName}Service(BaseService[{ModelName}, {ModelName}Create, {ModelName}Update]):
-    def __init__(self, repository: {ModelName}Repository = Inject({ModelName}Repository)):
+    def __init__(self, repository: {ModelName}Repository):
         super().__init__(model={ModelName}, repository=repository)
 """
 

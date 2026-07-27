@@ -8,7 +8,7 @@ filtering based on domain-isolated context restriction definitions.
 from typing import Any, Optional, ClassVar, Set
 from pydantic import BaseModel, model_validator, model_serializer
 
-from zcore.context.context import get_restricted_fields
+from zcore.context.context import ctx
 
 
 class Zchema(BaseModel):
@@ -29,7 +29,7 @@ class Zchema(BaseModel):
             return set()
 
         prefix = f"{model_name}."
-        restricted = get_restricted_fields()
+        restricted = ctx.restricted_fields
         relative_paths = set()
         
         for path in restricted:

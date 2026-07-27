@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING ,Any
+from typing import TYPE_CHECKING, Any
 from zcore.config import settings
 
 if TYPE_CHECKING:
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from zcore.web.response import ResponseWrapper
     from zcore.web.api_router import ZCoreAPIRoute
     from zcore.web.projection import Zchema
+    from zcore.context.context import ctx, ZContext
 
 __all__ = [
     'Inject',
@@ -33,9 +34,11 @@ __all__ = [
     'ResponseWrapper',
     'ZCoreAPIRoute',
     'Zchema',
-    "Plugin"
+    'Plugin',
+    'ctx',
+    "ZContext"
 ]
-    
+
 
 def __getattr__(name: str) -> Any:
     if name == "Kernel":
@@ -89,5 +92,11 @@ def __getattr__(name: str) -> Any:
     if name == "Plugin":
         from zcore.kernel.plugins import Plugin
         return Plugin
+    if name == "ZContext":
+        from zcore.context.context import ZContext
+        return ZContext
+    if name == "ctx":
+        from zcore.context.context import ctx
+        return ctx
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

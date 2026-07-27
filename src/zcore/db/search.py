@@ -17,7 +17,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
 from zcore.db.setup import Base
-from zcore.context.context import get_restricted_fields
+from zcore.context.context import ctx
 from zcore.exceptions.base import ValidationError, ForbiddenError
 
 ModelType = TypeVar("ModelType", bound=Base)
@@ -150,7 +150,7 @@ class SearchEngine:
             ValidationError: If inclusion depth exceeds limits or if a requested path 
                 does not exist on the target schemas.
         """
-        restricted = set(get_restricted_fields())
+        restricted = set(ctx.restricted_fields)
         valid_columns = {col.key for col in self.mapper.columns}
         
         MAX_INCLUDE_DEPTH = 3
