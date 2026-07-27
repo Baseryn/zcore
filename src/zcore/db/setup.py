@@ -5,17 +5,18 @@ asynchronous communication. It also provides the fundamental declarative base cl
 enriched with class-level metadata helper methods to manage object security permissions.
 """
 
+import time
 import structlog
 from fastapi import Depends
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncGenerator, Any, Optional, Annotated
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 from sqlalchemy.orm import DeclarativeBase
 
 from zcore.kernel.di import container
-
-logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,36 @@ class DatabaseManager:
         self._engine: Optional[AsyncEngine] = None
         self._session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
+    def _register_query_logger(self, sync_engine: Engine) -> None:
+        """Register events on connection cursors to intercept, sanitize, and log query statistics."""
+        dialect_name = sync_engine.dialect.name
+        db_logger = structlog.get_logger(f"zcore.db.{dialect_name}")
+        
+        @event.listens_for(sync_engine, "before_cursor_execute")
+        def before_cursor_execute(conn, cursor, statement, parameters, context, exec_many):
+            context._query_start_time = time.perf_counter()
+
+        @event.listens_for(sync_engine, "after_cursor_execute")
+        def after_cursor_execute(conn, cursor, statement, parameters, context, exec_many):
+            start_time = getattr(context, "_query_start_time", None)
+            duration_ms = 0.0
+            if start_time:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+
+            compact_statement = " ".join(statement.split())
+            
+            # Bypass low-level database metadata or catalog lookups to avoid noise
+            ignored_keywords = ["pg_catalog", "schema", "standard_conforming_strings", "transaction"]
+            if any(kw in compact_statement.lower() for kw in ignored_keywords):
+                return
+
+            db_logger.info(
+                "sql_query",
+                sql=compact_statement,
+                params=parameters,
+                duration_ms=round(duration_ms, 2)
+            )
+
     def init_app(
         self, 
         db_url: str, 
@@ -114,7 +145,7 @@ class DatabaseManager:
             pool_size: The connection pool size for non-SQLite databases. Defaults to 5.
             max_overflow: The max overflowing connections beyond pool size. Defaults to 10.
             pool_recycle: Connection recycle time in seconds. Defaults to 1800.
-            echo: Verbose SQL logging flag. Defaults to False.
+            echo: Verbose SQL logging flag. Unused directly, replaced by interceptor.
             **engine_kwargs: Additional keyword arguments forwarded to `create_async_engine`.
         """
         kwargs: dict[str, Any] = {}
@@ -125,7 +156,7 @@ class DatabaseManager:
 
         self._engine = create_async_engine(
             db_url,
-            echo=echo,
+            echo=False,  # Core SQLAlchemy raw echo is disabled to prevent logger double-cluttering
             pool_pre_ping=True,
             **kwargs,
             **engine_kwargs
@@ -135,13 +166,21 @@ class DatabaseManager:
             class_=AsyncSession,
             expire_on_commit=False
         )
-        logger.info("DatabaseManager successfully initialized.")
+        
+        # Attach the query-timing event hook directly to the underlying sync engine pool
+        self._register_query_logger(self._engine.sync_engine)
+        
+        # Resolve dialect-specific structural logging namespace
+        dialect_logger = structlog.get_logger(f"zcore.db.{self._engine.dialect.name}")
+        dialect_logger.info("DatabaseManager successfully initialized with dialect statement logger.")
 
     async def close(self) -> None:
         """Dispose of the database connection pool and terminate engine lifecycles."""
         if self._engine:
             await self._engine.dispose()
-            logger.info("DatabaseManager engine connections closed.")
+            
+            dialect_logger = structlog.get_logger(f"zcore.db.{self._engine.dialect.name}")
+            dialect_logger.info("DatabaseManager engine connections closed.")
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:

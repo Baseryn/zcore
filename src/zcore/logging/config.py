@@ -7,47 +7,45 @@ or serialized JSON records on production stream targets.
 """
 
 import logging
-import sys
 import structlog
 
-LOG_LEVEL = "INFO"
-
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(message)s",
-    stream=sys.stderr,
-)
-
-# Shared structlog processors executing transformation steps sequentially
-shared_processors = [
-    structlog.contextvars.merge_contextvars,
-    structlog.processors.add_log_level,
-    structlog.processors.format_exc_info,
-    structlog.processors.TimeStamper(fmt="iso"),
-    structlog.stdlib.PositionalArgumentsFormatter(),
-]
-
-# Render interactive ANSI terminal streams locally, or serialized JSON in production
-renderer = (
-    structlog.dev.ConsoleRenderer()
-    if sys.stderr.isatty()
-    else structlog.processors.JSONRenderer()
-)
+from zcore.config import settings
 
 
 def setup_logging() -> None:
     """Configure the global structlog logging engine.
 
-    Applies the shared processor chain, hooks standard library logging factories 
-    for consistency across external packages, resolves the appropriate rendering format 
-    based on the terminal environment context, and caches loggers to reduce downstream 
-    reflection overhead.
+    Suppresses duplicate logging handlers from third-party libraries (like uvicorn or sqlalchemy)
+    and routes all framework telemetry through a unified structlog pipeline.
     """
+    for logger_name in ("uvicorn", "uvicorn.access", "sqlalchemy.engine"):
+        log = logging.getLogger(logger_name)
+        log.handlers = []
+        log.propagate = True
+
+    shared_processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.format_exc_info,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.PositionalArgumentsFormatter(),
+    ]
+
+    if getattr(settings, "DEBUG", False):
+        try:
+            from rich.traceback import install
+            install(show_locals=False)
+        except ImportError:
+            pass
+        renderer = structlog.dev.ConsoleRenderer(colors=True)
+        log_level = logging.DEBUG
+    else:
+        renderer = structlog.processors.JSONRenderer()
+        log_level = logging.INFO
+
     structlog.configure(
         processors=shared_processors + [renderer],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, LOG_LEVEL)
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(log_level),
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
