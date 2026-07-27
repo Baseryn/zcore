@@ -5,6 +5,7 @@ if TYPE_CHECKING:
     from zcore.kernel.engine import Kernel
     from zcore.kernel.plugins import Plugin
     from zcore.kernel.di import container, Inject
+    from zcore.kernel.events import on_event, EventDispatcher
     from zcore.db.setup import Base, SessionDep, db_manager, get_db
     from zcore.db.repository import BaseRepository
     from zcore.db.search import SearchRequest
@@ -21,6 +22,8 @@ if TYPE_CHECKING:
 __all__ = [
     'Inject',
     'container',
+    'on_event',
+    'EventDispatcher',
     'Kernel',
     'settings',
     'Base',
@@ -108,5 +111,11 @@ def __getattr__(name: str) -> Any:
     if name == "BaseAuth":
         from zcore.security.auth import BaseAuth
         return BaseAuth
+    if name == "on_event":
+        from zcore.kernel.events import on_event
+        return on_event
+    if name == "EventDispatcher":
+        from zcore.kernel.events import EventDispatcher
+        return EventDispatcher
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
