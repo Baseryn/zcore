@@ -14,7 +14,7 @@ from typing import Any
 from starlette.types import ASGIApp, Scope, Receive, Send
 
 from zcore.kernel.di import _current_scope_id, container
-from zcore.context.context import request_context
+from zcore.context.context import ctx
 from zcore.db.setup import db_manager
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,25 +83,27 @@ class RequestLogMiddleware:
                 message["headers"] = headers
             await send(message)
 
-        with request_context(user_id=None, fields=None):
-            try:
-                await self.app(scope, receive, send_wrapper)
-                duration = (time.perf_counter() - s_time) * 1000
-                log.info(
-                    "http request",
-                    method=scope.get("method"),
-                    path=scope.get("path"),
-                    duration_ms=round(duration, 2),
-                )
-            except Exception:
-                duration = (time.perf_counter() - s_time) * 1000
-                log.exception(
-                    "http request failed",
-                    method=scope.get("method"),
-                    path=scope.get("path"),
-                    duration_ms=round(duration, 2),
-                )
-                raise
+        token = ctx.initialize()
+        try:
+            await self.app(scope, receive, send_wrapper)
+            duration = (time.perf_counter() - s_time) * 1000
+            log.info(
+                "http request",
+                method=scope.get("method"),
+                path=scope.get("path"),
+                duration_ms=round(duration, 2),
+            )
+        except Exception:
+            duration = (time.perf_counter() - s_time) * 1000
+            log.exception(
+                "http request failed",
+                method=scope.get("method"),
+                path=scope.get("path"),
+                duration_ms=round(duration, 2),
+            )
+            raise
+        finally:
+            ctx.reset(token)
             
 
 class ScopedDependencyMiddleware:

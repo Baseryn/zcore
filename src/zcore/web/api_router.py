@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from zcore.utils.helpers import json_dumps
 from zcore.web.response import ResponseWrapper
-from zcore.context.context import get_restricted_fields
+from zcore.context.context import ctx
 
 
 class ZCoreRequest(Request):
@@ -127,13 +127,13 @@ class ZCoreAPIRoute(APIRoute):
                     success=True,
                     message="Schema generated successfully",
                     data=schema_dict,
-                    meta={"restricted_fields": list(get_restricted_fields())}
+                    meta={"restricted_fields": list(ctx.restricted_fields)}
                 )
                 return JSONResponse(content=response_payload.model_dump())
 
             response: Response = await original_route_handler(zcore_request)
             
-            hidden_fields = get_restricted_fields()
+            hidden_fields = ctx.restricted_fields
             if hidden_fields and "application/json" in response.headers.get("content-type", "").lower():
                 vary = response.headers.get("vary", "")
                 target_vary_headers = ["Authorization", "Cookie"]
