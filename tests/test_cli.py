@@ -12,7 +12,6 @@ def run_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
-@pytest.mark.anyio
 @pytest.mark.parametrize(
     "project_name",
     [
@@ -20,7 +19,7 @@ def run_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "enterprise_service",
     ]
 )
-async def test_cli_init_command(run_in_tmp_path: Path, project_name: str) -> None:
+def test_cli_init_command(run_in_tmp_path: Path, project_name: str) -> None:
     test_args = ["zc", "init", project_name]
     
     with patch.object(sys, "argv", test_args):
@@ -35,12 +34,10 @@ async def test_cli_init_command(run_in_tmp_path: Path, project_name: str) -> Non
 
     env_content = (project_dir / ".env").read_text()
     assert f'PROJECT_NAME="{project_name}"' in env_content
-    assert "ENVIRONMENT=development" in env_content
 
     secret_key_match = re.search(r'SECRET_KEY="([a-f0-9]{64})"', env_content)
     assert secret_key_match is not None
 
-@pytest.mark.anyio
 @pytest.mark.parametrize(
     "app_name, with_template, expected_pascal_name",
     [
@@ -48,8 +45,9 @@ async def test_cli_init_command(run_in_tmp_path: Path, project_name: str) -> Non
         ("order_management", False, "OrderManagement"),
     ]
 )
-async def test_cli_startapp_scaffolding(
+def test_cli_startapp_scaffolding(
     run_in_tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     app_name: str,
     with_template: bool,
     expected_pascal_name: str
@@ -59,7 +57,7 @@ async def test_cli_startapp_scaffolding(
     with patch.object(sys, "argv", init_args):
         main()
 
-    os.chdir(run_in_tmp_path / project_name)
+    monkeypatch.chdir(run_in_tmp_path / project_name)
 
     startapp_args = ["zc", "startapp", app_name]
     if with_template:

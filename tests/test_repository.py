@@ -24,7 +24,7 @@ class RepoTestUpdateSchema(BaseModel):
     name: str | None = None
     description: str | None = None
 
-class RepoTestRepository(BaseRepository[RepoTestModel, RepoTestCreateSchema, RepoTestUpdateSchema]):
+class RepoTestRepository(BaseRepository[RepoTestModel]):
     def __init__(self, db: Any) -> None:
         super().__init__(RepoTestModel, db)
 
@@ -53,7 +53,7 @@ async def test_repo_create_and_get(db_session: Any, name: str, description: str 
     assert created.name == name
     assert created.description == description
 
-    fetched_with_fields = await repo.get(created.id, fields=[RepoTestModel.name])
+    fetched_with_fields = await repo.get(id=created.id, fields=[RepoTestModel.name])
     assert fetched_with_fields is not None
     assert fetched_with_fields.name == name
 
@@ -132,5 +132,5 @@ async def test_repo_delete_multi(db_session: Any, non_existent_id: int) -> None:
     assert item1.id in deleted_ids
     assert item2.id in deleted_ids
 
-    assert await repo.get(item1.id) is None
-    assert await repo.get(item2.id) is None
+    assert await repo.get(id=item1.id) is None
+    assert await repo.get(id=item2.id) is None
