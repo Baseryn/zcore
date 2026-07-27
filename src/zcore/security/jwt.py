@@ -37,7 +37,7 @@ def _get_signing_keys() -> tuple[Union[str, bytes], Union[str, bytes], str]:
         return private_key, public_key, settings.ALGORITHM
         
     # Default to Symmetric signing
-    is_prod = getattr(settings, "ENVIRONMENT", "production").lower() == "production"
+    is_prod = getattr(settings, "DEBUG", False) == False
     is_fallback = settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
     
     if is_prod and is_fallback:

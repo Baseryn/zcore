@@ -17,7 +17,7 @@ db_manager.init_app(
     db_url=settings.DATABASE_URL,
     pool_size=settings.POOL_SIZE,
     max_overflow=settings.MAX_OVERFLOW,
-    echo=(settings.ENVIRONMENT == "development")
+    echo=(settings.DEBUG)
 )
 
 # Initialize ZCore Kernel & Plugins
@@ -45,12 +45,12 @@ async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
-        "environment": settings.ENVIRONMENT
+        "debug": settings.DEBUG
     }
 """
 
 ENV_TEMPLATE = """PYTHONPATH=.
-ENVIRONMENT=development
+DEBUG=True
 PROJECT_NAME="{project_name}"
 DATABASE_URL=sqlite+aiosqlite:///zcore_dev.db
 SECRET_KEY="{secret_key}"

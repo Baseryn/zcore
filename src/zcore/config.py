@@ -34,7 +34,7 @@ class ZCoreCoreSettings(BaseSettings):
         REFRESH_TOKEN_EXPIRE_DAYS: Expiry duration for refresh tokens in days.
         STORAGE_PATH: Local filesystem base path reserved for target storage uploads.
         REDIS_URL: Redis connection URI, or None if Redis is not used.
-        ENVIRONMENT: Deployment environment context (e.g., 'production', 'development', 'test').
+        DEBUG: Boolean flag indicating whether the application is in debug mode.
     """
 
     model_config = SettingsConfigDict(
@@ -56,7 +56,7 @@ class ZCoreCoreSettings(BaseSettings):
     
     STORAGE_PATH: str = "./storage"
     REDIS_URL: str | None = None
-    ENVIRONMENT: str = "production"
+    DEBUG: bool = True
 
 
 def initialize_settings(settings_inst: ZCoreCoreSettings) -> None:
