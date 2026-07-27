@@ -2,7 +2,7 @@ import argparse
 import sys
 import secrets
 
-from zcore.cli.commands import init_project, start_app, run_server
+from zcore.cli.commands import init_project, start_app, run_server, gen_env
 
 def main() -> None:
     """
@@ -61,6 +61,22 @@ def main() -> None:
         help="Generates a cryptographically secure 64-character hex string for production SECRET_KEY"
     )
 
+    genenv_parser = subparsers.add_parser(
+        "genenv",
+        help="Generates a template .env file based on the active Settings class fields"
+    )
+    genenv_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default=".env.example",
+        help="Target output filepath (default: .env.example)"
+    )
+    genenv_parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Overwrite the file if it already exists"
+    )
+
     args = parser.parse_args()
 
     if args.version:
@@ -88,6 +104,9 @@ def main() -> None:
     elif args.command == "gensecret":
         print("🔑 Generated Cryptographic Secret Key:")
         print(secrets.token_hex(32))
+
+    elif args.command == "genenv":
+        gen_env(args.output, args.force)
 
     else:
         parser.print_help()
