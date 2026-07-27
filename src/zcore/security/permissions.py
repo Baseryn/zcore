@@ -9,7 +9,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 from fastapi import Request, Depends
 
-from zcore.exceptions.base import ForbiddenError, AuthError
+from zcore.context import ctx
+from zcore.exceptions import ForbiddenError, AuthError
 from zcore.security.protocols import UserProtocol
 from zcore.security.dependencies import get_current_user_stub
 
@@ -104,6 +105,8 @@ class HasScopes(BasePermission):
     async def has_permission(self, request: Request, user: UserProtocol) -> bool:
         """Validate user scopes against the required set of scopes.
 
+        Resolves scopes dynamically from the context scope mapping or user properties.
+
         Args:
             request: The active incoming FastAPI HTTP request.
             user: The user model conforming to UserProtocol.
@@ -115,5 +118,13 @@ class HasScopes(BasePermission):
         if self.allow_superuser and getattr(user, "is_superuser", False):
             return True
             
-        user_scopes = getattr(user, "all_scopes", set())
+        # Dynamically fetch scopes from the requests' ZContext or the user object directly
+        user_scopes = ctx.get("scopes") or getattr(user, "scopes", None) or set()
+        
+        # Coerce scope structures to ensure compatible validation checks
+        if isinstance(user_scopes, (list, tuple, frozenset)):
+            user_scopes = set(user_scopes)
+        elif isinstance(user_scopes, str):
+            user_scopes = {user_scopes}
+            
         return self.required_scopes.issubset(user_scopes)
