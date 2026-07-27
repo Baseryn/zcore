@@ -210,16 +210,19 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
 class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     """Mixin implementing data modification and persistence operations."""
 
-    async def create(self, schema: BaseModel) -> ModelType:
-        """Create a new database record from a validated creation schema.
+    async def create(self, schema: BaseModel, **extra_data: Any) -> ModelType:
+        """Create a new database record from a validated creation schema and dynamic fields.
 
         Args:
             schema: The validated Pydantic model containing properties for the new record.
+            **extra_data: Dynamic fields to merge with the primary payload.
 
         Returns:
             The created and refreshed database model instance.
         """
-        record = self.model(**schema.model_dump())
+        data = schema.model_dump()
+        data.update(extra_data)
+        record = self.model(**data)
         self.db.add(record)
         await self.db.flush()
         await self.db.refresh(record)
@@ -247,14 +250,15 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                 await self.db.refresh(record)
         return records
 
-    async def update(self, id: Any, schema: BaseModel, partial: bool = False) -> Optional[ModelType]:
-        """Update an existing database record.
+    async def update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> Optional[ModelType]:
+        """Update an existing database record with dynamic fields.
 
         Args:
             id: The primary key identifier of the record to update.
             schema: The Pydantic update schema containing modified parameters.
             partial: If True, applies modifications as a partial patch (ignoring unset fields).
                 If False, updates the record using all fields. Defaults to False.
+            **extra_data: Dynamic fields to merge with the primary payload.
 
         Returns:
             The updated and refreshed database model instance, or None if the record was not found.
@@ -263,6 +267,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not record:
             return None
         update_data = schema.model_dump(exclude_unset=partial)
+        update_data.update(extra_data)
         for field, value in update_data.items():
             setattr(record, field, value)
         await self.db.flush()

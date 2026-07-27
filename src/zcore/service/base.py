@@ -144,9 +144,13 @@ class ReadServiceMixin(AbstractService[ModelType]):
 class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     """Mixin implementing standardized mutation and persistence orchestration routines."""
 
-    async def pre_create(self, schema: BaseModel) -> None:
-        """Hook triggered prior to single-record database insertion."""
-        pass
+    async def pre_create(self, schema: BaseModel) -> Optional[Dict[str, Any]]:
+        """Hook triggered prior to single-record database insertion.
+
+        Returns:
+            An optional dictionary containing values to merge with the creation payload.
+        """
+        return None
 
     async def post_create(self, model: ModelType) -> None:
         """Hook triggered after single-record database insertion."""
@@ -160,9 +164,13 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after batch database insertions."""
         pass
 
-    async def pre_update(self, id: Any, schema: BaseModel, partial: bool) -> None:
-        """Hook triggered prior to modifying a single record."""
-        pass
+    async def pre_update(self, id: Any, schema: BaseModel, partial: bool) -> Optional[Dict[str, Any]]:
+        """Hook triggered prior to modifying a single record.
+
+        Returns:
+            An optional dictionary containing values to merge with the update payload.
+        """
+        return None
 
     async def post_update(self, model: ModelType) -> None:
         """Hook triggered after modifying a single record."""
@@ -202,17 +210,17 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
                 await self.repository.db.rollback()
                 raise
 
-    async def on_create(self, schema: BaseModel) -> ModelType:
+    async def on_create(self, schema: BaseModel, **extra_data: Any) -> ModelType:
         """Execute core single-record creation in database."""
-        return await self.repository.create(schema)
+        return await self.repository.create(schema, **extra_data)
 
     async def on_create_multi(self, schemas: List[BaseModel], refresh: bool = False) -> Sequence[ModelType]:
         """Execute core batch-record creation in database."""
         return await self.repository.create_multi(schemas, refresh=refresh)
 
-    async def on_update(self, id: Any, schema: BaseModel, partial: bool = False) -> Optional[ModelType]:
+    async def on_update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> Optional[ModelType]:
         """Execute core single-record update in database."""
-        return await self.repository.update(id, schema, partial)
+        return await self.repository.update(id, schema, partial, **extra_data)
 
     async def on_update_multi(
         self, 
@@ -231,10 +239,21 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Execute core batch-record deletions in database."""
         return await self.repository.delete_multi(ids)
 
-    async def create(self, schema: BaseModel) -> ModelType:
-        """Orchestrate the creation and persistence of a new domain entity."""
-        await self.pre_create(schema)
-        result = await self.on_create(schema)
+    async def create(self, schema: BaseModel, **extra_data: Any) -> ModelType:
+        """Orchestrate the creation and persistence of a new domain entity.
+
+        Merges pre-create dictionary output with the creation payload.
+
+        Args:
+            schema: Validated parameters containing fields for the new record.
+            **extra_data: Extra fields to append during initialization.
+
+        Returns:
+            The created and processed database model instance.
+        """
+        hook_data = await self.pre_create(schema) or {}
+        combined_extra = {**hook_data, **extra_data}
+        result = await self.on_create(schema, **combined_extra)
         await self.post_create(result)
         await self._safe_commit()
         return result
@@ -247,10 +266,26 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def update(self, id: Any, schema: BaseModel, partial: bool = False) -> ModelType:
-        """Orchestrate modifications to an existing domain entity."""
-        await self.pre_update(id, schema, partial)
-        result = await self.on_update(id, schema, partial)
+    async def update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> ModelType:
+        """Orchestrate modifications to an existing domain entity.
+
+        Merges pre-update dictionary output with the update payload.
+
+        Args:
+            id: The primary key of the record to update.
+            schema: Validated fields representing the modifications.
+            partial: If True, applies changes as a partial patch. Defaults to False.
+            **extra_data: Extra fields to append.
+
+        Returns:
+            The updated and processed database model instance.
+
+        Raises:
+            EntityNotFound: If the target entity identifier is not found in the database.
+        """
+        hook_data = await self.pre_update(id, schema, partial) or {}
+        combined_extra = {**hook_data, **extra_data}
+        result = await self.on_update(id, schema, partial, **combined_extra)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         await self.post_update(result)
@@ -305,7 +340,16 @@ class SearchServiceMixin(AbstractService[ModelType]):
         return await self.repository.search(search_in, pagination)
 
     async def search(self, search_in: SearchRequest, pagination: Any = None) -> Any:
-        """Build and execute dynamic filters, pre-loading patterns, and sorting paths."""
+        """Build and execute dynamic filters, pre-loading patterns, and sorting paths.
+
+        Args:
+            search_in: The system-wide dynamic search request model.
+            pagination: Pagination settings (cursor or offset models). Defaults to None.
+
+        Returns:
+            A paginated wrapper envelope containing post-search processed records,
+            or an unpaginated sequence of processed database model instances.
+        """
         await self.pre_search(search_in)
         result = await self.on_search(search_in, pagination)
         if pagination is None:
