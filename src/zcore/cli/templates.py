@@ -156,13 +156,13 @@ class {ModelName}Repository(BaseRepository[{ModelName}, {ModelName}Create, {Mode
         super().__init__(model={ModelName}, db=db)
 """
 
-SERVICE_TEMPLATE = """from zcore import BaseService, Inject
+SERVICE_TEMPLATE = """from zcore import BaseService
 from .models import {ModelName}
 from .schemas import {ModelName}Create, {ModelName}Update
 from .repositories import {ModelName}Repository
 
 class {ModelName}Service(BaseService[{ModelName}, {ModelName}Create, {ModelName}Update]):
-    def __init__(self, repository: {ModelName}Repository = Inject({ModelName}Repository)):
+    def __init__(self, repository: {ModelName}Repository):
         super().__init__(model={ModelName}, repository=repository)
 """
 

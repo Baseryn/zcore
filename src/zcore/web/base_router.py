@@ -18,7 +18,7 @@ from zcore.web.response import ResponseWrapper
 from zcore.web.api_router import ZCoreAPIRoute
 from zcore.db.search import SearchRequest
 from zcore.service.base import BaseService
-from zcore.kernel.di import Inject
+from zcore.kernel.di import Injector
 
 if TYPE_CHECKING:
    from zcore.db.pagination import BasePagination
@@ -211,7 +211,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     def _register_routes(self) -> None:
         """Dynamically generate and bind endpoints to the APIRouter."""
         service_callable = self.service
-        service_dependency = Inject(service_callable)
+        service_dependency = Depends(Injector(service_callable))
 
         if RouteKey.POST not in self.exclude:
             c_schema = self.create_schema

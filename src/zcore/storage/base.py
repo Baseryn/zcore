@@ -65,7 +65,7 @@ class StorageProvider(ABC):
 
 
 async def get_storage_provider(
-    provider: StorageProvider = Inject(StorageProvider)
+    provider: Inject[StorageProvider]
 ) -> StorageProvider:
     """FastAPI dependency to resolve the active storage provider.
 
