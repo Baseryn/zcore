@@ -1,4 +1,3 @@
-# src/zcore/cli/commands.py
 import os
 import sys
 import secrets
@@ -127,3 +126,71 @@ def run_server() -> None:
         print("\n👋 Server shutdown cleanly.")
     except Exception as e:
         print(f"❌ Failed to run Uvicorn dev server: {e}")
+
+def gen_env(output_file: str = ".env.example", force: bool = False) -> None:
+    """Generates a template .env file based on the registered Settings class.
+    
+    This function discovers the active Settings class by trying to import the user's main
+    module (supporting relative imports by using package context), resolving the settings 
+    instance via IoC container or subclass tracking, and formatting the field default values.
+    """
+    import importlib
+    cwd = Path.cwd()
+    parent_dir = cwd.parent
+    module_name = cwd.name
+
+    imported = False
+    if module_name.isidentifier():
+        if str(parent_dir) not in sys.path:
+            sys.path.insert(0, str(parent_dir))
+        try:
+            importlib.import_module(f"{module_name}.main")
+            imported = True
+        except Exception:
+            pass
+
+    if not imported:
+        if str(cwd) not in sys.path:
+            sys.path.insert(0, str(cwd))
+        try:
+            import main
+        except Exception:
+            pass
+
+    from zcore.config import get_settings, Settings
+    from pydantic_core import PydanticUndefined
+
+    subclasses = Settings.__subclasses__()
+    if subclasses:
+        settings_class = max(subclasses, key=lambda c: len(c.model_fields))
+    else:
+        try:
+            settings_class = get_settings().__class__
+        except Exception:
+            settings_class = Settings
+
+    out_path = Path(output_file)
+    if out_path.exists() and not force:
+        print(f"❌ Error: Output file '{out_path}' already exists. Use --force to overwrite.")
+        sys.exit(1)
+
+    env_lines = []
+    for field_name, field_info in settings_class.model_fields.items():
+        default_val = field_info.default
+        if default_val is PydanticUndefined or default_val is None:
+            env_lines.append(f"{field_name}=")
+        else:
+            if isinstance(default_val, bool):
+                env_lines.append(f"{field_name}={str(default_val)}")
+            elif isinstance(default_val, (int, float)):
+                env_lines.append(f"{field_name}={default_val}")
+            else:
+                env_lines.append(f"{field_name}={str(default_val)}")
+
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(env_lines) + "\n")
+        print(f"✅ Created: {out_path} based on '{settings_class.__name__}' configuration fields.")
+    except Exception as e:
+        print(f"❌ Failed to generate env file: {e}")
+        sys.exit(1)
