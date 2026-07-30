@@ -6,14 +6,20 @@ response wrapper envelope prior to transmission.
 """
 
 import structlog
+from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from zcore.exceptions.base import AppException
 from zcore.web.response import ResponseWrapper
+from zcore.utils.helpers import json_dumps
 
 log = structlog.get_logger()
 
+
+class ZCoreJSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        return json_dumps(content).encode("utf-8")
 
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """Asynchronously intercept application exceptions and build unified JSON responses.
@@ -49,7 +55,7 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
         }
     )
     
-    return JSONResponse(
+    return ZCoreJSONResponse(
         status_code=exc.status_code,
         content=response_payload.model_dump()
     )
