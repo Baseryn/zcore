@@ -96,7 +96,7 @@ class BaseAuth(Generic[T]):
         if not getattr(user_data, "is_active", True):
             raise AuthError(message="User inactive")
 
-        for field_name in user_data.model_fields:
+        for field_name in type(user_data).model_fields:
             value = getattr(user_data, field_name)
             if field_name == "id":
                 ctx.user_id = value
