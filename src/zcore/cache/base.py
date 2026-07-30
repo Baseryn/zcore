@@ -84,7 +84,7 @@ async def close_cache() -> None:
         
     if _shared_redis_client:
         try:
-            await _shared_redis_client.close()
+            await _shared_redis_client.aclose()
             _shared_redis_client = None
             logger.info("Shared Redis cache connection closed successfully.")
         except Exception as e:
