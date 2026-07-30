@@ -1,20 +1,30 @@
 import uuid
-from typing import Any, AsyncGenerator
-from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
+
 from pydantic import BaseModel
+from unittest.mock import AsyncMock
+from typing import Any, AsyncGenerator
 from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import load_only
 
 from zcore.db.repository import BaseRepository
 from zcore.db.setup import Base
+from zcore.db.pagination import PageNumberParams, CursorParams
+from zcore.db.search import SearchRequest, FilterItem
+from zcore.context.context import ctx
+from zcore.exceptions.base import ValidationError, ForbiddenError
 
 class RepoTestModel(Base):
     __tablename__ = f"repo_test_model_{uuid.uuid4().hex[:6]}"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
+
+    @classmethod
+    def scope_query(cls, query: Any) -> Any:
+        if getattr(cls, "_scoped_mode", False):
+            return query.where(cls.name.startswith("Active"))
+        return query
 
 class RepoTestCreateSchema(BaseModel):
     name: str
@@ -134,3 +144,194 @@ async def test_repo_delete_multi(db_session: Any, non_existent_id: int) -> None:
 
     assert await repo.get(id=item1.id) is None
     assert await repo.get(id=item2.id) is None
+
+@pytest.mark.anyio
+async def test_repo_exist(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="UniqueItem", description="Desc"))
+    assert await repo.exist(name="UniqueItem") is True
+    assert await repo.exist(RepoTestModel.name == "UniqueItem") is True
+    assert await repo.exist(name="NonExistent") is False
+
+@pytest.mark.anyio
+async def test_repo_count(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="ItemA"))
+    await repo.create(RepoTestCreateSchema(name="ItemB"))
+    assert await repo.count() == 2
+    assert await repo.count(RepoTestModel.name == "ItemA") == 1
+
+@pytest.mark.anyio
+async def test_repo_get_by_ids_empty_and_options(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    res = await repo.get_by_ids([])
+    assert res == []
+    
+    item = await repo.create(RepoTestCreateSchema(name="Test"))
+    res2 = await repo.get_by_ids([item.id], fields=[RepoTestModel.name])
+    assert len(res2) == 1
+    assert res2[0].name == "Test"
+
+@pytest.mark.anyio
+async def test_repo_update_multi(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    item1 = await repo.create(RepoTestCreateSchema(name="A", description="D1"))
+    item2 = await repo.create(RepoTestCreateSchema(name="B", description="D2"))
+    
+    data = {
+        item1.id: RepoTestUpdateSchema(name="A_New"),
+        item2.id: RepoTestUpdateSchema(name="B_New", description="D2_New"),
+        99999: RepoTestUpdateSchema(name="C_New")
+    }
+    
+    updated = await repo.update_multi(data, partial=True, refresh=True)
+    assert len(updated) == 2
+    
+    fetched1 = await repo.get(id=item1.id)
+    fetched2 = await repo.get(id=item2.id)
+    assert fetched1.name == "A_New"
+    assert fetched1.description == "D1"
+    assert fetched2.name == "B_New"
+    assert fetched2.description == "D2_New"
+
+@pytest.mark.anyio
+async def test_repo_delete_single(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    item = await repo.create(RepoTestCreateSchema(name="DelMe"))
+    
+    deleted = await repo.delete(item.id)
+    assert deleted is not None
+    assert deleted.name == "DelMe"
+    
+    assert await repo.get(id=item.id) is None
+    assert await repo.delete(99999) is None
+
+@pytest.mark.anyio
+async def test_repo_create_multi_no_refresh(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    schemas = [
+        RepoTestCreateSchema(name="NR1"),
+        RepoTestCreateSchema(name="NR2")
+    ]
+    results = await repo.create_multi(schemas, refresh=False)
+    assert len(results) == 2
+    assert results[0].name == "NR1"
+
+@pytest.mark.anyio
+async def test_repo_page_number_pagination(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    for i in range(15):
+        await repo.create(RepoTestCreateSchema(name=f"Item_{i:02d}"))
+        
+    params = PageNumberParams(page=2, size=5, sort_by="name", sort_order="desc")
+    res = await repo.get_list(pagination=params)
+    
+    assert res.meta["total"] == 15
+    assert res.meta["page"] == 2
+    assert res.meta["total_pages"] == 3
+    assert res.meta["has_next"] is True
+    assert res.meta["has_prev"] is True
+    assert len(res.data) == 5
+    assert res.data[0].name == "Item_09"
+
+@pytest.mark.anyio
+async def test_repo_page_number_sorting_validation(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    params = PageNumberParams(page=1, size=5, sort_by="invalid_col")
+    with pytest.raises(ValidationError):
+        await repo.get_list(pagination=params)
+
+@pytest.mark.anyio
+async def test_repo_cursor_pagination(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    items = []
+    for i in range(5):
+        item = await repo.create(RepoTestCreateSchema(name=f"C_{i}"))
+        items.append(item)
+        
+    params1 = CursorParams(size=2)
+    res1 = await repo.get_list(pagination=params1)
+    assert len(res1.data) == 2
+    assert res1.meta["has_more"] is True
+    assert res1.meta["next_cursor"] is not None
+    
+    params2 = CursorParams(size=2, cursor=res1.meta["next_cursor"])
+    res2 = await repo.get_list(pagination=params2)
+    assert len(res2.data) == 2
+    assert res2.meta["has_more"] is True
+    
+    params3 = CursorParams(size=2, cursor=res2.meta["next_cursor"])
+    res3 = await repo.get_list(pagination=params3)
+    assert len(res3.data) == 1
+    assert res3.meta["has_more"] is False
+    assert res3.meta["next_cursor"] is None
+
+@pytest.mark.anyio
+async def test_repo_cursor_invalid(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    params = CursorParams(size=5, cursor="!!!invalid_b64!!!")
+    with pytest.raises(ValidationError):
+        await repo.get_list(pagination=params)
+
+@pytest.mark.anyio
+async def test_repo_search_engine_complex(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="Apple", description="Fruit"))
+    await repo.create(RepoTestCreateSchema(name="Banana", description="Fruit"))
+    await repo.create(RepoTestCreateSchema(name="Carrot", description="Vegetable"))
+    
+    req = SearchRequest(
+        filters=[
+            FilterItem(
+                op="and",
+                items=[
+                    FilterItem(field="description", op="eq", value="Fruit"),
+                    FilterItem(field="name", op="ilike", value="ba")
+                ]
+            )
+        ]
+    )
+    res = await repo.search(req)
+    assert len(res) == 1
+    assert res[0].name == "Banana"
+
+@pytest.mark.anyio
+async def test_repo_search_security_violation(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    
+    token = ctx.initialize()
+    table_suffix = RepoTestModel.__tablename__.split('_')[-1]
+    ctx.restricted_fields = frozenset([
+        "description",
+        f"repo_test_model_{table_suffix}.description"
+    ])
+    
+    req = SearchRequest(
+        filters=[
+            FilterItem(field="description", op="eq", value="Fruit")
+        ]
+    )
+    
+    try:
+        with pytest.raises(ForbiddenError):
+            await repo.search(req)
+    finally:
+        ctx.reset(token)
+
+@pytest.mark.anyio
+async def test_repo_scoped_row_level_isolation(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="Active_1"))
+    await repo.create(RepoTestCreateSchema(name="Active_2"))
+    await repo.create(RepoTestCreateSchema(name="Inactive_1"))
+    
+    assert await repo.count() == 3
+    
+    RepoTestModel._scoped_mode = True
+    try:
+        assert await repo.count() == 2
+        res = await repo.get_list()
+        for item in res:
+            assert item.name.startswith("Active")
+    finally:
+        RepoTestModel._scoped_mode = False
