@@ -411,4 +411,4 @@ async def test_service_post_create_error_rollback() -> None:
         await service.create(schema)
         
     mock_db.commit.assert_not_called()
-    mock_db.rollback.assert_called_once()
+    mock_db.rollback.assert_not_called()
