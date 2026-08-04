@@ -1,11 +1,19 @@
+import os
 from io import BytesIO
 from typing import AsyncGenerator
 import pytest
+import aiofiles
 from fastapi import UploadFile
 
 from zcore.exceptions.base import AppException, ValidationError
 from zcore.storage.local import LocalStorageProvider
-from zcore.storage.validators import MaxFileSizeValidator, SafeMimeTypeValidator
+from zcore.storage.validators import (
+    FileExtensionValidator,
+    MaxFileSizeValidator,
+    SafeMimeTypeValidator,
+)
+from zcore.storage.base import get_storage_provider, StorageProvider
+from zcore.kernel.di import container
 
 def create_mock_upload_file(content: bytes, filename: str, size: int | None = None) -> UploadFile:
     file_obj = BytesIO(content)
@@ -98,3 +106,125 @@ def test_validator_max_file_size(
         with pytest.raises(ValidationError) as exc_info:
             validator(file)
         assert "exceeds the limit" in str(exc_info.value)
+
+@pytest.mark.anyio
+async def test_storage_successful_upload(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    file = create_mock_upload_file(b"test data content", "hello.txt")
+    path = await provider.upload(file, "text_files")
+    assert os.path.exists(path)
+    with open(path, "rb") as f:
+        assert f.read() == b"test data content"
+
+@pytest.mark.anyio
+async def test_storage_successful_upload_stream(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    async def fake_stream() -> AsyncGenerator[bytes, None]:
+        yield b"chunk_one_"
+        yield b"chunk_two"
+    path = await provider.upload_stream(fake_stream(), "streamed.bin", "streams")
+    assert os.path.exists(path)
+    with open(path, "rb") as f:
+        assert f.read() == b"chunk_one_chunk_two"
+
+@pytest.mark.anyio
+async def test_storage_collision_prevention(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    f1 = create_mock_upload_file(b"content 1", "test.txt")
+    f2 = create_mock_upload_file(b"content 2", "test.txt")
+    p1 = await provider.upload(f1, "collision")
+    p2 = await provider.upload(f2, "collision")
+    assert p1 != p2
+    assert os.path.exists(p1)
+    assert os.path.exists(p2)
+
+@pytest.mark.anyio
+async def test_storage_auto_directory_creation(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    f = create_mock_upload_file(b"data", "test.txt")
+    path = await provider.upload(f, "new/nested/folder")
+    assert os.path.exists(path)
+
+@pytest.mark.anyio
+async def test_storage_successful_delete(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    f = create_mock_upload_file(b"data", "test.txt")
+    path = await provider.upload(f, "docs")
+    assert os.path.exists(path)
+    res = await provider.delete(path)
+    assert res is True
+    assert not os.path.exists(path)
+
+@pytest.mark.anyio
+async def test_storage_delete_non_existent(test_storage_dir: str) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    fake_path = os.path.join(test_storage_dir, "docs", "missing.txt")
+    res = await provider.delete(fake_path)
+    assert res is True
+
+def test_validator_file_extension_case_insensitive() -> None:
+    validator = FileExtensionValidator(allowed_extensions=["png", "JPEG"])
+    f1 = create_mock_upload_file(b"", "image.PNG")
+    f2 = create_mock_upload_file(b"", "photo.jpeg")
+    f3 = create_mock_upload_file(b"", "avatar.png")
+    validator(f1)
+    validator(f2)
+    validator(f3)
+
+def test_validator_file_extension_blocked() -> None:
+    validator = FileExtensionValidator(allowed_extensions=["pdf"])
+    f = create_mock_upload_file(b"", "script.py")
+    with pytest.raises(ValidationError):
+        validator(f)
+
+def test_validator_file_extension_missing() -> None:
+    validator = FileExtensionValidator(allowed_extensions=["pdf"])
+    f = create_mock_upload_file(b"", "config")
+    with pytest.raises(ValidationError):
+        validator(f)
+
+def test_validator_file_extension_double_extension_attack() -> None:
+    validator = FileExtensionValidator(allowed_extensions=["pdf", "png"])
+    f1 = create_mock_upload_file(b"", "doc.pdf.exe")
+    f2 = create_mock_upload_file(b"", "avatar.png.php")
+    with pytest.raises(ValidationError):
+        validator(f1)
+    with pytest.raises(ValidationError):
+        validator(f2)
+
+def test_validator_mime_fallback() -> None:
+    validator = SafeMimeTypeValidator(allowed_mimes=["application/json", "text/plain"])
+    f1 = create_mock_upload_file(b'{"key": "value"}', "data.json")
+    f2 = create_mock_upload_file(b"plain text", "note.txt")
+    validator(f1)
+    validator(f2)
+
+def test_validator_mime_read_error() -> None:
+    validator = SafeMimeTypeValidator(allowed_mimes=["image/png"])
+    class ErrorFile:
+        def read(self, *args, **kwargs):
+            raise OSError("Hardware read error")
+        def seek(self, *args, **kwargs):
+            pass
+    upload_file = UploadFile(file=ErrorFile(), filename="test.png")
+    with pytest.raises(ValidationError) as exc_info:
+        validator(upload_file)
+    assert "Failed to validate file signatures." in str(exc_info.value)
+
+@pytest.mark.anyio
+async def test_storage_os_permission_error(test_storage_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = LocalStorageProvider(base_path=test_storage_dir)
+    file = create_mock_upload_file(b"test data", "permission.txt")
+    def mock_open(*args, **kwargs):
+        raise OSError("Mock disk error")
+    monkeypatch.setattr(aiofiles, "open", mock_open)
+    with pytest.raises(AppException) as exc_info:
+        await provider.upload(file, "uploads")
+    assert "Error saving file" in str(exc_info.value)
+
+@pytest.mark.anyio
+async def test_storage_provider_dependency(test_storage_dir: str) -> None:
+    provider_instance = LocalStorageProvider(base_path=test_storage_dir)
+    container.register_singleton(StorageProvider, provider_instance)
+    resolved = await get_storage_provider(provider_instance)
+    assert resolved is provider_instance
