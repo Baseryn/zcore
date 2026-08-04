@@ -48,7 +48,13 @@ def main() -> None:
     startapp_parser.add_argument(
         "-t", "--template",
         action="store_true",
-        help="Generate files populated with ZCore boilerplate templates (default generates clean/empty files)"
+        help="Generate files populated with ZCore boilerplate templates"
+    )
+    
+    startapp_parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Generate test files for the app"
     )
 
     subparsers.add_parser(
@@ -96,7 +102,7 @@ def main() -> None:
             print(f"❌ Error: '{app_name}' is not a valid Python module name.")
             print("👉 Recommendation: Use snake_case names (e.g. order_management)")
             sys.exit(1)
-        start_app(app_name, with_template=args.template)
+        start_app(app_name, with_template=args.template, with_test=args.test)
 
     elif args.command == "run":
         run_server()

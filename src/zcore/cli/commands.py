@@ -13,7 +13,8 @@ from .templates import (
     REPOSITORY_TEMPLATE,
     SERVICE_TEMPLATE,
     ROUTER_TEMPLATE,
-    PLUGIN_TEMPLATE
+    PLUGIN_TEMPLATE,
+    TEST_TEMPLATE
 )
 
 def create_file(path: Path, content: str) -> None:
@@ -51,7 +52,7 @@ def init_project(project_name: str) -> None:
     print(f"\n🎉 Project '{project_name}' initialized successfully!")
     print(f"👉 Run: 'cd {project_name}' and run 'python -m zcore.cli startapp <app_name>' to generate a plugin!")
 
-def start_app(app_name: str, with_template: bool = False) -> None:
+def start_app(app_name: str, with_template: bool = False, with_test: bool = False) -> None:
     app_dir = Path(app_name.lower())
     
     if app_dir.exists():
@@ -80,12 +81,14 @@ def start_app(app_name: str, with_template: bool = False) -> None:
         "plugin.py": PLUGIN_TEMPLATE.format(**context)
     }
 
-    print(f"\n🚀 Scaffolding ZCore Domain App (with Built-In Plugin): {model_name}..."
-           if with_template else f"\n💫 Scaffolding Clean ZCore App (WITHOUT Boilerplate): {model_name}...")
+    if with_test:
+        files_to_create["tests.py"] = TEST_TEMPLATE.format(**context) if with_template else ""
+
+    print(f"\n🚀 Scaffolding ZCore Domain App: {model_name}...")
     for filename, content in files_to_create.items():
         create_file(app_dir / filename, content)
         
-    print(f"\n🎉 Modular App '{app_name}' created successfully with its core Plugin wrapper!")
+    print(f"\n🎉 Modular App '{app_name}' created successfully!")
     print("👉 REGISTER this plugin in your main.py:")
     print(f"   from {app_name}.plugin import {model_name}Plugin")
     print(f"   kernel.add_plugin({model_name}Plugin())")
@@ -107,7 +110,7 @@ def run_server() -> None:
                         key, val = parts[0].strip(), parts[1].strip()
                         if key == "HOST":
                             host = val
-                        elif key == "PORT":
+                        if key == "PORT":
                             port = val
 
     print(f"📡 Starting ZCore Dev Server on {host}:{port}...")
