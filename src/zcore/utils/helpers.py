@@ -1,17 +1,17 @@
 """Common Utility Helper Functions.
 
-This module provides common utility helper functions, including a custom JSON encoder 
-that safely processes dates, decimals, and UUIDs, corresponding serialization/deserialization 
+This module provides common utility helper functions, including a custom JSON encoder
+that safely processes dates, decimals, and UUIDs, corresponding serialization/deserialization
 wrappers, and a text transformation utility to generate URL-safe slugs.
 """
 
+import json
 import re
 import uuid
-import json
-
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Annotated, Any
+
 from pydantic import HttpUrl, PlainSerializer
 
 # Serializes HttpUrl objects into clean strings dynamically for Pydantic exports
@@ -21,7 +21,7 @@ SafeUrl = Annotated[HttpUrl, PlainSerializer(lambda v: str(v), return_type=str)]
 def slugify(text: str) -> str:
     """Transform a text string into an URL-safe slug representation.
 
-    Strips surrounding whitespace, normalizes casing to lowercase, removes 
+    Strips surrounding whitespace, normalizes casing to lowercase, removes
     non-alphanumeric characters, and replaces spaces and underscores with single dashes.
 
     Args:
@@ -31,17 +31,17 @@ def slugify(text: str) -> str:
         The URL-safe, sanitized, and hyphenated slug string.
     """
     text = text.lower().strip()
-    text = re.sub(r'[^\w\s-]', '', text)
-    text = re.sub(r'[\s_-]+', '-', text)
-    text = re.sub(r'^-+|-+$', '', text)
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "-", text)
+    text = re.sub(r"^-+|-+$", "", text)
     return text
 
 
 class CustomJSONEncoder(json.JSONEncoder):
     """JSON encoder capable of serializing advanced Python data types.
 
-    Extends the standard library JSONEncoder to serialize instances of UUID, 
-    datetime/date/time, and Decimal, falling back to a string representation 
+    Extends the standard library JSONEncoder to serialize instances of UUID,
+    datetime/date/time, and Decimal, falling back to a string representation
     for other unrecognized objects to prevent serialization failures.
     """
 

@@ -1,6 +1,6 @@
 """Security Protocol Definitions.
 
-This module defines the runtime-checkable `UserProtocol` which establishes the 
+This module defines the runtime-checkable `UserProtocol` which establishes the
 structural contract required of ZCore user entities to integrate with authorization systems.
 """
 
@@ -12,7 +12,7 @@ from typing import Protocol, runtime_checkable
 class UserProtocol(Protocol):
     """Protocol establishing standard user characteristics.
 
-    Any user model within the ZCore framework must implement this protocol to 
+    Any user model within the ZCore framework must implement this protocol to
     integrate with security middleware and route decorators.
 
     Attributes:

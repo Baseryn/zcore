@@ -1,18 +1,25 @@
 """ZCore Core Business Service Layer.
 
-This module provides the structural base service abstractions and mixins for orchestration 
-of domain logic in the ZCore framework. It coordinates transactional operations, integrates 
-lifecycle hooks (pre- and post-execution stages), and facilitates safe unit-of-work 
+This module provides the structural base service abstractions and mixins for orchestration
+of domain logic in the ZCore framework. It coordinates transactional operations, integrates
+lifecycle hooks (pre- and post-execution stages), and facilitates safe unit-of-work
 commits to prevent premature transactional boundaries from breaking transaction atomicity.
 """
 
+from collections.abc import Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    TypeVar,
+)
+
 from pydantic import BaseModel
-from typing import Generic, TypeVar, Type, Any, Sequence, Optional, List, Dict, TYPE_CHECKING
 from sqlalchemy.orm.interfaces import ExecutableOption
 
-from zcore.exceptions.base import EntityNotFound
-from zcore.db.setup import Base
 from zcore.db.search import SearchRequest
+from zcore.db.setup import Base
+from zcore.exceptions.base import EntityNotFound
 
 if TYPE_CHECKING:
     from zcore.db.repository import BaseRepository
@@ -29,14 +36,14 @@ class AbstractService(Generic[ModelType]):
     """
 
     repository: "BaseRepository"
-    model: Type[ModelType]
+    model: type[ModelType]
 
     async def get(
-        self, 
-        *criterion: Any, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None,
-        **filters: Any
+        self,
+        *criterion: Any,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+        **filters: Any,
     ) -> ModelType:
         """Fetch a single domain entity by dynamic filters.
 
@@ -52,10 +59,10 @@ class AbstractService(Generic[ModelType]):
         raise NotImplementedError
 
     async def get_by_ids(
-        self, 
-        ids: List[Any], 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
+        self,
+        ids: list[Any],
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
     ) -> Sequence[ModelType]:
         """Fetch a sequence of domain entities matching the list of keys.
 
@@ -86,11 +93,11 @@ class ReadServiceMixin(AbstractService[ModelType]):
         return await self.repository.exist(*criterion, **filters)
 
     async def get(
-        self, 
-        *criterion: Any, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None,
-        **filters: Any
+        self,
+        *criterion: Any,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+        **filters: Any,
     ) -> ModelType:
         """Fetch a single domain entity, applying post-retrieval hooks.
 
@@ -106,31 +113,35 @@ class ReadServiceMixin(AbstractService[ModelType]):
         Raises:
             EntityNotFound: If the target entity identifier is not found in the database.
         """
-        result = await self.repository.get(*criterion, fields=fields, options=options, **filters)
+        result = await self.repository.get(
+            *criterion, fields=fields, options=options, **filters
+        )
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         return await self.post_get(result)
 
     async def get_by_ids(
-        self, 
-        ids: List[Any], 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
+        self,
+        ids: list[Any],
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
     ) -> Sequence[ModelType]:
         """Fetch multiple domain entities by their identifiers, applying post-retrieval hooks."""
         result = await self.repository.get_by_ids(ids, fields, options)
         return await self.post_get_multi(result)
 
     async def get_list(
-        self, 
-        pagination: Any = None, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None,
+        self,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
         *criterion: Any,
-        **filters: Any
+        **filters: Any,
     ) -> Any:
         """Fetch a paginated or complete listing of entities, applying post-retrieval hooks."""
-        result = await self.repository.get_list(pagination, fields, options, *criterion, **filters)
+        result = await self.repository.get_list(
+            pagination, fields, options, *criterion, **filters
+        )
         if pagination is None:
             return await self.post_get_multi(result)
         result.data = await self.post_get_multi(result.data)
@@ -144,7 +155,7 @@ class ReadServiceMixin(AbstractService[ModelType]):
 class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     """Mixin implementing standardized mutation and persistence orchestration routines."""
 
-    async def pre_create(self, schema: BaseModel) -> Optional[Dict[str, Any]]:
+    async def pre_create(self, schema: BaseModel) -> dict[str, Any] | None:
         """Hook triggered prior to single-record database insertion.
 
         Returns:
@@ -155,8 +166,8 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     async def post_create(self, model: ModelType) -> None:
         """Hook triggered after single-record database insertion."""
         pass
-    
-    async def pre_create_multi(self, schemas: List[BaseModel]) -> None:
+
+    async def pre_create_multi(self, schemas: list[BaseModel]) -> None:
         """Hook triggered prior to batch database insertions."""
         pass
 
@@ -164,7 +175,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after batch database insertions."""
         pass
 
-    async def pre_update(self, id: Any, schema: BaseModel, partial: bool) -> Optional[Dict[str, Any]]:
+    async def pre_update(
+        self, id: Any, schema: BaseModel, partial: bool
+    ) -> dict[str, Any] | None:
         """Hook triggered prior to modifying a single record.
 
         Returns:
@@ -175,8 +188,8 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     async def post_update(self, model: ModelType) -> None:
         """Hook triggered after modifying a single record."""
         pass
-    
-    async def pre_update_multi(self, data: Dict[Any, BaseModel], partial: bool) -> None:
+
+    async def pre_update_multi(self, data: dict[Any, BaseModel], partial: bool) -> None:
         """Hook triggered prior to updating a batch of records."""
         pass
 
@@ -191,8 +204,8 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     async def post_delete(self, model: ModelType) -> None:
         """Hook triggered after deleting a single record."""
         pass
-    
-    async def pre_delete_multi(self, ids: List[Any]) -> None:
+
+    async def pre_delete_multi(self, ids: list[Any]) -> None:
         """Hook triggered prior to deleting a batch of records."""
         pass
 
@@ -214,28 +227,29 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Execute core single-record creation in database."""
         return await self.repository.create(schema, **extra_data)
 
-    async def on_create_multi(self, schemas: List[BaseModel], refresh: bool = False) -> Sequence[ModelType]:
+    async def on_create_multi(
+        self, schemas: list[BaseModel], refresh: bool = False
+    ) -> Sequence[ModelType]:
         """Execute core batch-record creation in database."""
         return await self.repository.create_multi(schemas, refresh=refresh)
 
-    async def on_update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> Optional[ModelType]:
+    async def on_update(
+        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+    ) -> ModelType | None:
         """Execute core single-record update in database."""
         return await self.repository.update(id, schema, partial, **extra_data)
 
     async def on_update_multi(
-        self, 
-        data: Dict[Any, BaseModel], 
-        partial: bool = False, 
-        refresh: bool = False
+        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
     ) -> Sequence[ModelType]:
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
 
-    async def on_delete(self, id: Any) -> Optional[ModelType]:
+    async def on_delete(self, id: Any) -> ModelType | None:
         """Execute core single-record deletion in database."""
         return await self.repository.delete(id)
 
-    async def on_delete_multi(self, ids: List[Any]) -> Sequence[ModelType]:
+    async def on_delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
         """Execute core batch-record deletions in database."""
         return await self.repository.delete_multi(ids)
 
@@ -258,7 +272,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def create_multi(self, schemas: List[BaseModel], refresh: bool = False) -> Sequence[ModelType]:
+    async def create_multi(
+        self, schemas: list[BaseModel], refresh: bool = False
+    ) -> Sequence[ModelType]:
         """Orchestrate the batch creation and persistence of multiple domain entities."""
         await self.pre_create_multi(schemas)
         result = await self.on_create_multi(schemas, refresh=refresh)
@@ -266,7 +282,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> ModelType:
+    async def update(
+        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+    ) -> ModelType:
         """Orchestrate modifications to an existing domain entity.
 
         Merges pre-update dictionary output with the update payload.
@@ -293,10 +311,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return result
 
     async def update_multi(
-        self, 
-        data: Dict[Any, BaseModel], 
-        partial: bool = False, 
-        refresh: bool = False
+        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
     ) -> Sequence[ModelType]:
         """Orchestrate batch modifications to multiple existing domain entities."""
         await self.pre_update_multi(data, partial)
@@ -315,7 +330,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def delete_multi(self, ids: List[Any]) -> Sequence[ModelType]:
+    async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
         """Orchestrate batch deletions of multiple database records."""
         await self.pre_delete_multi(ids)
         result = await self.on_delete_multi(ids)
@@ -363,11 +378,11 @@ class BaseService(
     Generic[ModelType],
     ReadServiceMixin[ModelType],
     WriteServiceMixin[ModelType],
-    SearchServiceMixin[ModelType]
+    SearchServiceMixin[ModelType],
 ):
     """The default business service implementation."""
 
-    def __init__(self, model: Type[ModelType], repository: "BaseRepository") -> None:
+    def __init__(self, model: type[ModelType], repository: "BaseRepository") -> None:
         """Initialize the BaseService.
 
         Args:

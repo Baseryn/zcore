@@ -1,15 +1,16 @@
 """Storage Security Validators.
 
-This module provides validation controls to protect server integrity during file uploads. 
-It includes file extension checks, file size limit enforcement to defend against Denial 
-of Service (DoS) attacks, and MIME-type verification using magic bytes to detect 
+This module provides validation controls to protect server integrity during file uploads.
+It includes file extension checks, file size limit enforcement to defend against Denial
+of Service (DoS) attacks, and MIME-type verification using magic bytes to detect
 masqueraded executable scripts.
 """
 
 import mimetypes
+
 import structlog
-from typing import List, Set, Union, Optional
 from fastapi import UploadFile
+
 from zcore.exceptions.base import ValidationError
 
 logger = structlog.get_logger()
@@ -49,7 +50,11 @@ class FileExtensionValidator(BaseStorageValidator):
         message: Diagnostic warning message dispatched on failures.
     """
 
-    def __init__(self, allowed_extensions: Union[List[str], Set[str]], message: Optional[str] = None):
+    def __init__(
+        self,
+        allowed_extensions: list[str] | set[str],
+        message: str | None = None,
+    ):
         """Initialize the FileExtensionValidator.
 
         Args:
@@ -57,10 +62,13 @@ class FileExtensionValidator(BaseStorageValidator):
             message: Custom validation warning. Defaults to None.
         """
         self.allowed_extensions = {
-            ext.lower() if ext.startswith(".") else f".{ext.lower()}" 
+            ext.lower() if ext.startswith(".") else f".{ext.lower()}"
             for ext in allowed_extensions
         }
-        self.message = message or f"File extension not allowed. Allowed extensions are: {', '.join(sorted(self.allowed_extensions))}"
+        self.message = (
+            message
+            or f"File extension not allowed. Allowed extensions are: {', '.join(sorted(self.allowed_extensions))}"
+        )
 
     def __call__(self, file: UploadFile) -> None:
         """Check the uploaded file's extension against the allowed list.
@@ -73,7 +81,7 @@ class FileExtensionValidator(BaseStorageValidator):
         """
         filename = file.filename or ""
         ext = f".{filename.split('.')[-1].lower()}" if "." in filename else ""
-        
+
         if ext not in self.allowed_extensions:
             raise ValidationError(message=self.message)
 
@@ -87,7 +95,7 @@ class MaxFileSizeValidator(BaseStorageValidator):
         message: Diagnostic warning message dispatched on failures.
     """
 
-    def __init__(self, max_size_mb: float, message: Optional[str] = None):
+    def __init__(self, max_size_mb: float, message: str | None = None):
         """Initialize the MaxFileSizeValidator.
 
         Args:
@@ -109,7 +117,7 @@ class MaxFileSizeValidator(BaseStorageValidator):
         """
         # Utilize Starlette's native file.size if populated, fallback to seek evaluation
         size = getattr(file, "size", None)
-        
+
         if size is None:
             try:
                 # Fallback seeking for chunked multipart parsers
@@ -128,7 +136,7 @@ class SafeMimeTypeValidator(BaseStorageValidator):
     """MIME-type validator utilizing Magic Byte verification.
 
     Reads the header bytes of the file payload to verify that the file's content
-    matches its declared format. Blocks high-risk patterns such as PHP tag injections, 
+    matches its declared format. Blocks high-risk patterns such as PHP tag injections,
     HTML script tags, Unix shebang scripts, and Windows executables.
 
     Attributes:
@@ -136,7 +144,7 @@ class SafeMimeTypeValidator(BaseStorageValidator):
         message: Diagnostic warning message dispatched on failures.
     """
 
-    def __init__(self, allowed_mimes: Union[List[str], Set[str]], message: Optional[str] = None):
+    def __init__(self, allowed_mimes: list[str] | set[str], message: str | None = None):
         """Initialize the SafeMimeTypeValidator.
 
         Args:
@@ -144,7 +152,10 @@ class SafeMimeTypeValidator(BaseStorageValidator):
             message: Custom validation warning. Defaults to None.
         """
         self.allowed_mimes = set(allowed_mimes)
-        self.message = message or "Uploaded file content is corrupted or its MIME-type is not allowed."
+        self.message = (
+            message
+            or "Uploaded file content is corrupted or its MIME-type is not allowed."
+        )
 
     def __call__(self, file: UploadFile) -> None:
         """Analyze file headers to detect masquerading extensions or script injections.
@@ -153,7 +164,7 @@ class SafeMimeTypeValidator(BaseStorageValidator):
             file: The uploaded file payload to inspect.
 
         Raises:
-            ValidationError: If the file content violates security policies or contains 
+            ValidationError: If the file content violates security policies or contains
                 unauthorized file signatures.
         """
         try:
@@ -164,9 +175,18 @@ class SafeMimeTypeValidator(BaseStorageValidator):
             raise ValidationError(message="Failed to validate file signatures.")
 
         # Blocks PHP block tags, HTML script tags, Unix shebang scripts and Windows Executables
-        if b"<?php" in header_bytes or b"<script" in header_bytes or header_bytes.startswith(b"MZ") or header_bytes.startswith(b"#!/"):
-            logger.critical(f"BLOCKED EXECUTE INJECTION ATTEMPT. Malicious file signature in filename: '{file.filename}'")
-            raise ValidationError(message="Security policy violation: Executable scripts are strictly blocked.")
+        if (
+            b"<?php" in header_bytes
+            or b"<script" in header_bytes
+            or header_bytes.startswith(b"MZ")
+            or header_bytes.startswith(b"#!/")
+        ):
+            logger.critical(
+                f"BLOCKED EXECUTE INJECTION ATTEMPT. Malicious file signature in filename: '{file.filename}'"
+            )
+            raise ValidationError(
+                message="Security policy violation: Executable scripts are strictly blocked."
+            )
 
         detected_mime = None
         for signature, mime in SIGNATURES.items():
@@ -179,5 +199,7 @@ class SafeMimeTypeValidator(BaseStorageValidator):
             detected_mime, _ = mimetypes.guess_type(file.filename)
 
         if not detected_mime or detected_mime not in self.allowed_mimes:
-            logger.warning(f"File validation failed. Detected MIME '{detected_mime}' not in allowed list.")
+            logger.warning(
+                f"File validation failed. Detected MIME '{detected_mime}' not in allowed list."
+            )
             raise ValidationError(message=self.message)

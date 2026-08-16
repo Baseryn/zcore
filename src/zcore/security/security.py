@@ -1,13 +1,13 @@
 """Unified Security Services Module.
 
-This module coordinates password hashing (via Argon2id), JSON Web Token (JWT) lifecycle operations, 
+This module coordinates password hashing (via Argon2id), JSON Web Token (JWT) lifecycle operations,
 secure hexadecimal token generation, and cryptographic hashing digests under a single coherent interface.
 """
 
-import secrets
 import hashlib
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Union
+import secrets
+from datetime import UTC, datetime, timedelta
+
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
@@ -25,14 +25,12 @@ from zcore.exceptions import AuthError
 logger = structlog.get_logger()
 
 # Dynamically construct Argon2 parameters from config settings with safe fallbacks
-_memory_cost = getattr(settings, "ARGON2_MEMORY_COST", 65536)     # 64 MB
-_time_cost = getattr(settings, "ARGON2_TIME_COST", 3)             # 3 iterations
-_parallelism = getattr(settings, "ARGON2_PARALLELISM", 4)         # 4 threads
+_memory_cost = getattr(settings, "ARGON2_MEMORY_COST", 65536)  # 64 MB
+_time_cost = getattr(settings, "ARGON2_TIME_COST", 3)  # 3 iterations
+_parallelism = getattr(settings, "ARGON2_PARALLELISM", 4)  # 4 threads
 
 ph = PasswordHasher(
-    memory_cost=_memory_cost,
-    time_cost=_time_cost,
-    parallelism=_parallelism
+    memory_cost=_memory_cost, time_cost=_time_cost, parallelism=_parallelism
 )
 
 
@@ -99,27 +97,29 @@ class Security:
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
-    def _get_signing_keys() -> tuple[Union[str, bytes], Union[str, bytes], str]:
+    def _get_signing_keys() -> tuple[str | bytes, str | bytes, str]:
         """Resolve active private and public signing keys from config settings."""
         private_key = getattr(settings, "JWT_PRIVATE_KEY", None)
         public_key = getattr(settings, "JWT_PUBLIC_KEY", None)
-        
+
         if private_key and public_key:
             return private_key, public_key, settings.ALGORITHM
-            
-        is_prod = getattr(settings, "DEBUG", False)
-        is_fallback = settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
-        
+
+        is_prod = getattr(settings, "DEBUG", False) is False
+        is_fallback = (
+            settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
+        )
+
         if is_prod and is_fallback:
             raise RuntimeError(
                 "FATAL SECURITY VIOLATION: You are running in PRODUCTION environment "
                 "using the insecure default fallback SECRET_KEY. Application startup aborted."
             )
-            
+
         return settings.SECRET_KEY, settings.SECRET_KEY, settings.ALGORITHM
 
     @classmethod
-    def create_jwt(cls, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    def create_jwt(cls, data: dict, expires_delta: timedelta | None = None) -> str:
         """Create a signed JWT access token.
 
         Args:
@@ -131,10 +131,12 @@ class Security:
         """
         private_key, _, algorithm = cls._get_signing_keys()
         to_encode = data.copy()
-        
-        expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+
+        expire = datetime.now(UTC) + (
+            expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
         to_encode.update({"exp": expire})
-        
+
         try:
             return jwt.encode(to_encode, private_key, algorithm=algorithm)
         except Exception as e:
@@ -164,6 +166,6 @@ class Security:
         """Check if a Unix timestamp claim has expired."""
         if not token_exp:
             return True
-        expire_time = datetime.fromtimestamp(token_exp, tz=timezone.utc)
-        now = datetime.now(timezone.utc)
+        expire_time = datetime.fromtimestamp(token_exp, tz=UTC)
+        now = datetime.now(UTC)
         return now >= expire_time

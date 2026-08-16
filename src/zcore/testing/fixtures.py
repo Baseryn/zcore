@@ -1,15 +1,15 @@
 import uuid
-
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from zcore.kernel.di import container, _current_scope_id
-from zcore.db.setup import db_manager
 from zcore.context.context import _request_context_store
+from zcore.db.setup import db_manager
+from zcore.kernel.di import _current_scope_id, container
 
 
 class ZTestFixture(ABC):
@@ -20,6 +20,7 @@ class ZTestFixture(ABC):
     @abstractmethod
     async def tearDown(self) -> None:
         pass
+
 
 class ContainerSandbox(ZTestFixture):
     def __init__(self) -> None:
@@ -37,6 +38,7 @@ class ContainerSandbox(ZTestFixture):
         container._scoped_definitions = self._scoped
         container._factories = self._factories
 
+
 class DatabaseRollback(ZTestFixture):
     def __init__(self) -> None:
         self.connection = None
@@ -48,13 +50,13 @@ class DatabaseRollback(ZTestFixture):
     async def setUp(self) -> None:
         if not db_manager._engine:
             raise RuntimeError("DatabaseManager engine is uninitialized.")
-        
+
         self.connection = await db_manager._engine.connect()
         self.transaction = await self.connection.begin()
         self.session = AsyncSession(
             bind=self.connection,
             expire_on_commit=False,
-            join_transaction_mode="create_savepoint"
+            join_transaction_mode="create_savepoint",
         )
 
         scope_id = str(uuid.uuid4())
@@ -85,12 +87,13 @@ class DatabaseRollback(ZTestFixture):
         if self.connection:
             await self.connection.close()
 
+
 class UserContext(ZTestFixture):
     def __init__(
-        self, 
-        user_id: Any, 
-        scopes: list[str] | None = None, 
-        extra_context: dict[str, Any] | None = None
+        self,
+        user_id: Any,
+        scopes: list[str] | None = None,
+        extra_context: dict[str, Any] | None = None,
     ) -> None:
         self.user_id = user_id
         self.scopes = scopes or []
@@ -110,6 +113,7 @@ class UserContext(ZTestFixture):
         if self._token:
             _request_context_store.reset(self._token)
 
+
 class DependencyOverride(ZTestFixture):
     def __init__(self, app: FastAPI, stub: Any, override_func: Any) -> None:
         self.app = app
@@ -123,6 +127,7 @@ class DependencyOverride(ZTestFixture):
         if self.stub in self.app.dependency_overrides:
             del self.app.dependency_overrides[self.stub]
 
+
 class AppLifespan(ZTestFixture):
     def __init__(self, app: FastAPI) -> None:
         self.app = app
@@ -135,6 +140,7 @@ class AppLifespan(ZTestFixture):
     async def tearDown(self) -> None:
         if self.lifespan_ctx:
             await self.lifespan_ctx.__aexit__(None, None, None)
+
 
 class ZTest(ZTestFixture):
     def __init__(self, *fixtures: ZTestFixture) -> None:

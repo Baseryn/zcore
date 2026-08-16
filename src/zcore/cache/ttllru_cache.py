@@ -1,15 +1,16 @@
 """In-Memory Least-Recently-Used (LRU) Cache with Time-To-Live (TTL) Support.
 
-This module provides a thread-safe, in-memory cache implementation. It combines 
-LRU eviction boundaries with explicit expiration controls (TTL), registration metrics, 
+This module provides a thread-safe, in-memory cache implementation. It combines
+LRU eviction boundaries with explicit expiration controls (TTL), registration metrics,
 and global eviction utility tools.
 """
 
-import time
+import contextlib
 import threading
+import time
 import weakref
 from collections import OrderedDict
-from typing import Any, Optional, List
+from typing import Any
 
 # Track active cache instances via weak references to coordinate global sweeps without memory leaks
 _active_caches: weakref.WeakSet["TTLLRUCache"] = weakref.WeakSet()
@@ -18,8 +19,8 @@ _active_caches: weakref.WeakSet["TTLLRUCache"] = weakref.WeakSet()
 class TTLLRUCache:
     """Thread-safe LRU cache featuring granular record-level expiration boundaries.
 
-    Ensures that active read/write operations utilize reentrant thread locks to mitigate 
-    concurrency race conditions. Binds instances within a weak-reference registry 
+    Ensures that active read/write operations utilize reentrant thread locks to mitigate
+    concurrency race conditions. Binds instances within a weak-reference registry
     to facilitate background eviction sweeps.
 
     Attributes:
@@ -39,7 +40,7 @@ class TTLLRUCache:
         self._lock = threading.Lock()
         _active_caches.add(self)
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Fetch an item from the cache and slide its position to the end.
 
         Bypasses and discards the element inline if it has exceeded its TTL.
@@ -91,7 +92,7 @@ class TTLLRUCache:
     def evict_expired(self) -> None:
         """Sweep the local cache structure and purge any record that has exceeded its TTL."""
         now = time.time()
-        expired_keys: List[str] = []
+        expired_keys: list[str] = []
         with self._lock:
             for k, (expiry, _) in self.cache.items():
                 if now > expiry:
@@ -106,7 +107,5 @@ class TTLLRUCache:
         Safely handles dereferenced or collection-modified objects using weak-reference pools.
         """
         for cache_instance in list(_active_caches):
-            try:
+            with contextlib.suppress(ReferenceError):
                 cache_instance.evict_expired()
-            except ReferenceError:
-                pass

@@ -1,24 +1,22 @@
 """ZCore Database Repository Pattern Layer.
 
-This module provides a Repository pattern implementation for SQLAlchemy 
-2.0 and Pydantic V2. It decouples business logic from database interactions by exposing 
-highly specialized, reusable interfaces divided into read, write, and search capabilities. 
+This module provides a Repository pattern implementation for SQLAlchemy
+2.0 and Pydantic V2. It decouples business logic from database interactions by exposing
+highly specialized, reusable interfaces divided into read, write, and search capabilities.
 It supports dynamic pagination, eager load optimization, and field pruning.
 """
 
-from pydantic import BaseModel
-from typing import TYPE_CHECKING, Generic, TypeVar, Type, Any, Sequence, Optional, List
-from sqlalchemy import select, inspect, Select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.interfaces import ExecutableOption
-from sqlalchemy.orm import load_only
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from pydantic import BaseModel
+from sqlalchemy import Select, func, inspect, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
+from sqlalchemy.orm.interfaces import ExecutableOption
+
+from zcore.db.pagination import CursorPagination, CursorParams, PageNumberPagination
 from zcore.db.setup import Base
-from zcore.db.pagination import (
-    PageNumberPagination, 
-    CursorPagination, 
-    CursorParams
-)
 
 if TYPE_CHECKING:
     from zcore.db.search import SearchRequest
@@ -41,7 +39,7 @@ class AbstractRepository(Generic[ModelType]):
     """
 
     db: AsyncSession
-    model: Type[ModelType]
+    model: type[ModelType]
     pk: Any
     pk_name: str
     cursor_field: str
@@ -49,7 +47,7 @@ class AbstractRepository(Generic[ModelType]):
     def _get_base_query(self) -> Select:
         """Construct the initial select statement for query operations.
 
-        Enforces context security by dynamically executing 'scope_query' 
+        Enforces context security by dynamically executing 'scope_query'
         if defined on the model layer.
 
         Returns:
@@ -102,12 +100,12 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         return result.first() is not None
 
     async def get(
-        self, 
-        *criterion: Any, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None,
-        **filters: Any
-    ) -> Optional[ModelType]:
+        self,
+        *criterion: Any,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+        **filters: Any,
+    ) -> ModelType | None:
         """Fetch a single record by dynamic filters.
 
         Args:
@@ -124,15 +122,19 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = query.options(*options) if isinstance(options, list) else query.options(options)
+            query = (
+                query.options(*options)
+                if isinstance(options, list)
+                else query.options(options)
+            )
         result = await self.db.execute(query)
         return result.scalars().first()
 
     async def get_by_ids(
-        self, 
-        ids: List[Any], 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None
+        self,
+        ids: list[Any],
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
     ) -> Sequence[ModelType]:
         """Fetch a sequence of records matching a list of primary keys.
 
@@ -146,22 +148,26 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         """
         if not ids:
             return []
-            
+
         query = self._get_base_query().where(self.pk.in_(ids))
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = query.options(*options) if isinstance(options, list) else query.options(options)
+            query = (
+                query.options(*options)
+                if isinstance(options, list)
+                else query.options(options)
+            )
         result = await self.db.execute(query)
         return result.scalars().all()
 
     async def get_list(
-        self, 
-        pagination: Any = None, 
-        fields: Optional[List[Any]] = None, 
-        options: Optional[List[ExecutableOption]] = None,
+        self,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
         *criterion: Any,
-        **filters: Any
+        **filters: Any,
     ) -> Any:
         """Fetch a paginated or complete list of records matching filters.
 
@@ -180,13 +186,21 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = query.options(*options) if isinstance(options, list) else query.options(options)
-        
+            query = (
+                query.options(*options)
+                if isinstance(options, list)
+                else query.options(options)
+            )
+
         if pagination is None:
             result = await self.db.execute(query)
             return result.scalars().all()
-            
-        paginator = CursorPagination(self.cursor_field) if isinstance(pagination, CursorParams) else PageNumberPagination()
+
+        paginator = (
+            CursorPagination(self.cursor_field)
+            if isinstance(pagination, CursorParams)
+            else PageNumberPagination()
+        )
         return await paginator.paginate(self.db, query, pagination, self.model)
 
     async def count(self, *criterion: Any, **filters: Any) -> int:
@@ -228,7 +242,9 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         await self.db.refresh(record)
         return record
 
-    async def create_multi(self, schemas: List[BaseModel], refresh: bool = False) -> Sequence[ModelType]:
+    async def create_multi(
+        self, schemas: list[BaseModel], refresh: bool = False
+    ) -> Sequence[ModelType]:
         """Create multiple database records from a list of validation schemas.
 
         Args:
@@ -241,7 +257,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         """
         if not schemas:
             return []
-            
+
         records = [self.model(**schema.model_dump()) for schema in schemas]
         self.db.add_all(records)
         await self.db.flush()
@@ -250,7 +266,9 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                 await self.db.refresh(record)
         return records
 
-    async def update(self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any) -> Optional[ModelType]:
+    async def update(
+        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+    ) -> ModelType | None:
         """Update an existing database record with dynamic fields.
 
         Args:
@@ -275,10 +293,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def update_multi(
-        self, 
-        data: dict[Any, BaseModel], 
-        partial: bool = False, 
-        refresh: bool = False
+        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
     ) -> Sequence[ModelType]:
         """Batch update multiple database records mapped by their primary keys.
 
@@ -293,7 +308,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         """
         if not data:
             return []
-            
+
         records = await self.get_by_ids(ids=list(data.keys()))
         record_map = {getattr(r, self.pk_name): r for r in records}
         updated_records = []
@@ -310,7 +325,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                 await self.db.refresh(record)
         return updated_records
 
-    async def delete(self, id: Any) -> Optional[ModelType]:
+    async def delete(self, id: Any) -> ModelType | None:
         """Delete a single record by its primary key identifier.
 
         Args:
@@ -326,7 +341,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         await self.db.flush()
         return record
 
-    async def delete_multi(self, ids: List[Any]) -> Sequence[ModelType]:
+    async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
         """Delete multiple records matching the provided list of primary keys.
 
         Args:
@@ -337,7 +352,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         """
         if not ids:
             return []
-            
+
         records = await self.get_by_ids(ids=ids)
         for record in records:
             await self.db.delete(record)
@@ -356,10 +371,11 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             pagination: Pagination settings. Defaults to None.
 
         Returns:
-            A paginated response object containing matches, or a complete list of 
+            A paginated response object containing matches, or a complete list of
             unpaginated models.
         """
         from zcore.db.search import SearchEngine
+
         engine = SearchEngine(self.model)
         base_query = self._get_base_query()
         query = engine.build_base_query(search_in, base_query=base_query)
@@ -367,8 +383,12 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
         if pagination is None:
             result = await self.db.execute(query)
             return result.scalars().all()
-            
-        paginator = CursorPagination(self.cursor_field) if isinstance(pagination, CursorParams) else PageNumberPagination()
+
+        paginator = (
+            CursorPagination(self.cursor_field)
+            if isinstance(pagination, CursorParams)
+            else PageNumberPagination()
+        )
         return await paginator.paginate(self.db, query, pagination, self.model)
 
 
@@ -376,11 +396,11 @@ class BaseRepository(
     Generic[ModelType],
     ReadRepositoryMixin[ModelType],
     WriteRepositoryMixin[ModelType],
-    SearchRepositoryMixin[ModelType]
+    SearchRepositoryMixin[ModelType],
 ):
     """The default implementation combining Read, Write, and Search capabilities."""
 
-    def __init__(self, model: Type[ModelType], db: AsyncSession):
+    def __init__(self, model: type[ModelType], db: AsyncSession):
         """Initialize the BaseRepository.
 
         Args:

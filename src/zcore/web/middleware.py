@@ -1,22 +1,23 @@
 """Web Middleware Implementations.
 
-This module provides ASGI middleware to coordinate request lifecycles. It includes 
-`RequestLogMiddleware` to trace execution durations and manage request correlation headers, 
-and `ScopedDependencyMiddleware` to manage the lifecycle of request-scoped dependency injection 
+This module provides ASGI middleware to coordinate request lifecycles. It includes
+`RequestLogMiddleware` to trace execution durations and manage request correlation headers,
+and `ScopedDependencyMiddleware` to manage the lifecycle of request-scoped dependency injection
 container boundaries.
 """
 
 import re
-import uuid
 import time
-import structlog
+import uuid
 from typing import Any
-from starlette.types import ASGIApp, Scope, Receive, Send
 
-from zcore.kernel.di import _current_scope_id, container
+import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 from zcore.context.context import ctx
 from zcore.db.setup import db_manager
-from sqlalchemy.ext.asyncio import AsyncSession
+from zcore.kernel.di import _current_scope_id, container
 
 log = structlog.get_logger()
 REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-\.\_\:]{8,64}$")
@@ -25,8 +26,8 @@ REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-\.\_\:]{8,64}$")
 class RequestLogMiddleware:
     """ASGI middleware to manage request correlation IDs and log HTTP transaction metrics.
 
-    Intercepts HTTP requests, extracts or generates correlation IDs, binds them to 
-    structured logging contextvars, appends the correlation ID to response headers, 
+    Intercepts HTTP requests, extracts or generates correlation IDs, binds them to
+    structured logging contextvars, appends the correlation ID to response headers,
     and logs request durations.
 
     Attributes:
@@ -55,20 +56,24 @@ class RequestLogMiddleware:
 
         s_time = time.perf_counter()
         structlog.contextvars.clear_contextvars()
-        
+
         raw_request_id = b""
         for name, value in scope.get("headers", []):
             if name == b"x-request-id":  # Standard lowercased header in ASGI spec
                 raw_request_id = value
                 break
 
-        request_id_str = raw_request_id.decode("utf-8", errors="ignore").strip() if raw_request_id else ""
-        
+        request_id_str = (
+            raw_request_id.decode("utf-8", errors="ignore").strip()
+            if raw_request_id
+            else ""
+        )
+
         if request_id_str and REQUEST_ID_PATTERN.match(request_id_str):
             request_id = request_id_str
         else:
             request_id = str(uuid.uuid4())
-        
+
         structlog.contextvars.bind_contextvars(request_id=request_id)
 
         async def send_wrapper(message: dict[str, Any]) -> None:
@@ -104,13 +109,13 @@ class RequestLogMiddleware:
             raise
         finally:
             ctx.reset(token)
-            
+
 
 class ScopedDependencyMiddleware:
     """ASGI middleware to isolate request-scoped dependencies.
 
-    Initializes a new context scope key on incoming requests, binds it to the DI 
-    context variables, and executes a cleanup sweep of the scope's registered instances 
+    Initializes a new context scope key on incoming requests, binds it to the DI
+    context variables, and executes a cleanup sweep of the scope's registered instances
     upon connection closure.
 
     Attributes:
@@ -139,7 +144,7 @@ class ScopedDependencyMiddleware:
 
         scope_id = str(uuid.uuid4())
         token = _current_scope_id.set(scope_id)
-        
+
         # Capture background tasks context if integrated with FastAPI
         # We defer scope teardown if there are pending background tasks
         try:

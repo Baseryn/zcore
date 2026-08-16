@@ -1,10 +1,11 @@
 """Dynamic and Generic Authentication Base Layer.
 
-This module provides the generic `BaseAuth` class to coordinate token decoding, 
+This module provides the generic `BaseAuth` class to coordinate token decoding,
 caching logic, and dynamic context injection during FastAPI request cycles.
 """
 
-from typing import Any, Generic, Type, TypeVar
+from typing import Any, Generic, TypeVar
+
 from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
@@ -27,11 +28,11 @@ class BaseAuth(Generic[T]):
 
     def __init__(
         self,
-        user_schema: Type[T],
+        user_schema: type[T],
         identity_claim: str = "sub",
         token_type: str = "access",
         cache_prefix: str = "auth",
-        cache_ttl: int = 300
+        cache_ttl: int = 300,
     ) -> None:
         """Initialize the BaseAuth instance.
 
@@ -61,7 +62,9 @@ class BaseAuth(Generic[T]):
         """
         raise NotImplementedError
 
-    async def __call__(self, request: Request, token: str = Depends(oauth2_scheme)) -> T:
+    async def __call__(
+        self, request: Request, token: str = Depends(oauth2_scheme)
+    ) -> T:
         """Execute core request interception authentication workflow.
 
         Args:
@@ -91,7 +94,9 @@ class BaseAuth(Generic[T]):
                 raise AuthError(message="User inactive or not found.")
 
             user_data = self.user_schema.model_validate(db_user)
-            await self.cache.set(cache_key, user_data.model_dump(mode="json"), ttl=self.cache_ttl)
+            await self.cache.set(
+                cache_key, user_data.model_dump(mode="json"), ttl=self.cache_ttl
+            )
 
         if not getattr(user_data, "is_active", True):
             raise AuthError(message="User inactive")

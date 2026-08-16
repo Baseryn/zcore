@@ -1,24 +1,25 @@
 """Kernel Orchestration Subsystem.
 
-This module coordinates application modules, managing registration, dependency resolution, 
-and topological sorting of Plugins. It orchestrates async startup and shutdown Lifespan hooks 
+This module coordinates application modules, managing registration, dependency resolution,
+and topological sorting of Plugins. It orchestrates async startup and shutdown Lifespan hooks
 associated with FastAPI applications.
 """
 
 import graphlib
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Dict, List
+
 from fastapi import FastAPI
 
+from zcore.kernel.di import container
 from zcore.kernel.events import EventDispatcher
 from zcore.kernel.plugins import Plugin
-from zcore.kernel.di import container
 
 
 class Kernel:
     """The central core coordinator for the application lifespan and plugins.
 
-    Assembles registered plugins into a directed acyclic graph (DAG), resolves 
+    Assembles registered plugins into a directed acyclic graph (DAG), resolves
     inter-plugin dependencies, and handles sequential lifespan transitions.
 
     Attributes:
@@ -29,9 +30,9 @@ class Kernel:
 
     def __init__(self) -> None:
         """Initialize a new empty Kernel instance."""
-        self.plugins: Dict[str, Plugin] = {}
+        self.plugins: dict[str, Plugin] = {}
         self.dispatcher = EventDispatcher()
-        self._sorted_plugins: List[Plugin] = []
+        self._sorted_plugins: list[Plugin] = []
 
     def add_plugin(self, plugin: Plugin) -> None:
         """Register an application plugin instance in the local registry.
@@ -41,10 +42,10 @@ class Kernel:
         """
         self.plugins[plugin.name] = plugin
 
-    def _resolve_dependencies(self) -> List[Plugin]:
+    def _resolve_dependencies(self) -> list[Plugin]:
         """Resolve and sort application plugins topologically using dependency paths.
 
-        Constructs a dependency graph from declared plugin structures and validates the 
+        Constructs a dependency graph from declared plugin structures and validates the
         integrity of the resolution path.
 
         Returns:
@@ -54,7 +55,7 @@ class Kernel:
             RuntimeError: If a cyclic reference is detected in the graph, or if a declared
                 plugin dependency is missing from active configurations.
         """
-        graph: Dict[str, List[str]] = {}
+        graph: dict[str, list[str]] = {}
         for name, plugin in self.plugins.items():
             graph[name] = plugin.dependencies
 
@@ -64,14 +65,16 @@ class Kernel:
         except graphlib.CycleError as e:
             raise RuntimeError(f"Cyclic dependency detected among plugins: {e}")
 
-        resolved: List[Plugin] = []
+        resolved: list[Plugin] = []
         for name in order:
             if name in self.plugins:
                 resolved.append(self.plugins[name])
             else:
                 for p in self.plugins.values():
                     if name in p.dependencies:
-                        raise RuntimeError(f"Missing dependency: '{name}' required by plugin '{p.name}'")
+                        raise RuntimeError(
+                            f"Missing dependency: '{name}' required by plugin '{p.name}'"
+                        )
         return resolved
 
     def setup(self, app: FastAPI) -> None:
@@ -93,7 +96,7 @@ class Kernel:
     async def lifespan(self, app: FastAPI) -> AsyncGenerator[None, None]:
         """Asynchronous context manager governing the active application lifespan.
 
-        Sequentially invokes startup lifecycle phases on sorted plugin units 
+        Sequentially invokes startup lifecycle phases on sorted plugin units
         and guarantees clean, reversed tear-down triggers upon termination.
 
         Args:

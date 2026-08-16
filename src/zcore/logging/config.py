@@ -1,12 +1,13 @@
 """ZCore Structured Logging Configuration.
 
-This module initializes the application's logging pipeline. It integrates standard 
-Python `logging` with `structlog` to provide structured, context-aware diagnostics. 
-It dynamically formats output as developer-friendly, colorized text on interactive terminals 
+This module initializes the application's logging pipeline. It integrates standard
+Python `logging` with `structlog` to provide structured, context-aware diagnostics.
+It dynamically formats output as developer-friendly, colorized text on interactive terminals
 or serialized JSON records on production stream targets.
 """
 
 import logging
+
 import structlog
 
 from zcore.config import settings
@@ -34,6 +35,7 @@ def setup_logging() -> None:
     if getattr(settings, "DEBUG", False):
         try:
             from rich.traceback import install
+
             install(show_locals=False)
         except ImportError:
             pass
@@ -44,7 +46,7 @@ def setup_logging() -> None:
         log_level = logging.INFO
 
     structlog.configure(
-        processors=shared_processors + [renderer],
+        processors=[*shared_processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,

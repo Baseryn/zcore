@@ -1,17 +1,15 @@
 """ZCore Exception Definitions.
 
-This module defines the primary domain-specific exception hierarchy used throughout 
-the framework. These exceptions are mapped to standard HTTP status codes, allowing 
+This module defines the primary domain-specific exception hierarchy used throughout
+the framework. These exceptions are mapped to standard HTTP status codes, allowing
 consistent translation from interior business failures into client-facing HTTP responses.
 """
-
-from typing import Optional
 
 
 class AppException(Exception):
     """Base exception class for all custom runtime errors within the ZCore application.
 
-    Acts as the parent class for errors that need to be captured by global HTTP handlers 
+    Acts as the parent class for errors that need to be captured by global HTTP handlers
     and returned as standardized API error responses.
 
     Attributes:
@@ -21,8 +19,8 @@ class AppException(Exception):
     """
 
     status_code: int = 500
-    
-    def __init__(self, message: str, payload: Optional[dict] = None) -> None:
+
+    def __init__(self, message: str, payload: dict | None = None) -> None:
         """Initialize the AppException.
 
         Args:

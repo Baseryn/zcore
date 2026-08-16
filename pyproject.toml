@@ -88,6 +88,24 @@ features = [
     'all'
 ]
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # Line too long (managed automatically by formatter)
+    "B008",   # Do not perform function call Depends in argument defaults (FastAPI standard)
+    "B024",   # Base class has no abstract methods
+    "B039",   # ContextVar mutable default
+    "B904",   # Use raise from in except clauses
+    "BLE001", # Do not catch blind exception Exception
+    "TRY201", # Use raise without specifying exception name
+    "PYI036", # The argument in __aexit__ should be annotated
+    "SIM102", # Nested if statements
+]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

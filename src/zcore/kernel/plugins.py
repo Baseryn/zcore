@@ -1,10 +1,11 @@
 """Plugin Architecture Protocol.
 
-This module defines the structured contract interface that all ZCore plugins must satisfy 
+This module defines the structured contract interface that all ZCore plugins must satisfy
 to register with the central application orchestrator Kernel.
 """
 
 from typing import Protocol, runtime_checkable
+
 from fastapi import FastAPI
 
 
@@ -12,7 +13,7 @@ from fastapi import FastAPI
 class Plugin(Protocol):
     """Protocol structure modeling standard Plugin lifecycle interfaces.
 
-    Any module intended to run as a plugin component within the ZCore kernel context 
+    Any module intended to run as a plugin component within the ZCore kernel context
     must comply with this runtime-checkable protocol interface.
 
     Attributes:

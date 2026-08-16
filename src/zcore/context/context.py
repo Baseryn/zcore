@@ -1,26 +1,30 @@
 """
 ZCore Context Management Module.
 
-This module provides a robust, thread-safe, and coroutine-aware context storage 
-system using Python's `contextvars` library. It is designed to manage 
-request-scoped state, such as authentication identifiers and security filters, 
-ensuring state isolation across asynchronous task boundaries and preventing 
+This module provides a robust, thread-safe, and coroutine-aware context storage
+system using Python's `contextvars` library. It is designed to manage
+request-scoped state, such as authentication identifiers and security filters,
+ensuring state isolation across asynchronous task boundaries and preventing
 leaks between concurrent executions.
 """
 
 import uuid
-from contextvars import ContextVar, Token
-from typing import Any, Optional, Dict, Union, Iterable
+from collections.abc import Iterable
 from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from typing import Any
 
-_request_context_store: ContextVar[Dict[str, Any]] = ContextVar("request_context_store", default={})
+_request_context_store: ContextVar[dict[str, Any]] = ContextVar(
+    "request_context_store", default={}
+)
+
 
 class ZContext:
     """
     Unified interface for managing asynchronous execution contexts.
 
-    Encapsulates the logic for storing and retrieving scoped data. This class 
-    supports dynamic key-value storage while providing strongly-typed properties 
+    Encapsulates the logic for storing and retrieving scoped data. This class
+    supports dynamic key-value storage while providing strongly-typed properties
     for common framework-level attributes like user identity and data restrictions.
     """
 
@@ -67,7 +71,7 @@ class ZContext:
             _request_context_store.set(new_store)
 
     @classmethod
-    def initialize(cls) -> Token[Dict[str, Any]]:
+    def initialize(cls) -> Token[dict[str, Any]]:
         """
         Resets the context store to an empty state for the current scope.
 
@@ -77,7 +81,7 @@ class ZContext:
         return _request_context_store.set({})
 
     @classmethod
-    def reset(cls, token: Token[Dict[str, Any]]) -> None:
+    def reset(cls, token: Token[dict[str, Any]]) -> None:
         """
         Restores the context store to a state corresponding to the provided token.
 
@@ -87,7 +91,7 @@ class ZContext:
         _request_context_store.reset(token)
 
     @property
-    def user_id(self) -> Optional[uuid.UUID]:
+    def user_id(self) -> uuid.UUID | None:
         """
         Retrieves the authenticated user identifier from the current context.
 
@@ -97,7 +101,7 @@ class ZContext:
         return self.get("user_id")
 
     @user_id.setter
-    def user_id(self, value: Union[uuid.UUID, str, None]) -> None:
+    def user_id(self, value: uuid.UUID | str | None) -> None:
         """
         Sets and validates the user identifier for the current context.
 
@@ -135,7 +139,7 @@ class ZContext:
         return self.get("restricted_fields", frozenset())
 
     @restricted_fields.setter
-    def restricted_fields(self, value: Optional[Iterable[str]]) -> None:
+    def restricted_fields(self, value: Iterable[str] | None) -> None:
         """
         Updates the restricted fields, ensuring immutability through frozenset.
 
@@ -168,5 +172,6 @@ class ZContext:
             yield
         finally:
             _request_context_store.reset(token)
+
 
 ctx = ZContext()
