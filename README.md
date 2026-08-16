@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Baseryn/zcore-docs/main/public/banner.png" alt="ZCore Logo" width="620">
+  <img src="https://raw.githubusercontent.com/Baseryn/zcore-docs/master/public/banner.png" alt="ZCore Logo" width="620">
 </p>
 
 <p align="center">
