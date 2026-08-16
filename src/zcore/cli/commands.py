@@ -156,7 +156,7 @@ def gen_env(output_file: str = ".env.example", force: bool = False) -> None:
         if str(cwd) not in sys.path:
             sys.path.insert(0, str(cwd))
         try:
-            import main
+            import main  # noqa: F401
         except Exception:
             pass
 

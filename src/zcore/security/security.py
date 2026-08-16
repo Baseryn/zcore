@@ -107,7 +107,7 @@ class Security:
         if private_key and public_key:
             return private_key, public_key, settings.ALGORITHM
             
-        is_prod = getattr(settings, "DEBUG", False) == False
+        is_prod = getattr(settings, "DEBUG", False)
         is_fallback = settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
         
         if is_prod and is_fallback:
