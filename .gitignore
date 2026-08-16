@@ -41,3 +41,6 @@ env/
 .env
 .env.local
 .env.*
+
+# database
+*.db

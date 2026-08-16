@@ -1,17 +1,19 @@
 """Fine-Grained Role and Scope Permission Controls.
 
-This module implements base permission abstractions for FastAPI endpoints. It supports 
+This module implements base permission abstractions for FastAPI endpoints. It supports
 checking general permissions, object-level checks, and validating active OAuth/OIDC scopes,
 with optional bypass configurations for superusers.
 """
 
 from abc import ABC, abstractmethod
 from typing import Any
-from fastapi import Request, Depends
 
-from zcore.exceptions.base import ForbiddenError, AuthError
-from zcore.security.protocols import UserProtocol
+from fastapi import Depends, Request
+
+from zcore.context import ctx
+from zcore.exceptions import AuthError, ForbiddenError
 from zcore.security.dependencies import get_current_user_stub
+from zcore.security.protocols import UserProtocol
 
 
 class BasePermission(ABC):
@@ -33,7 +35,9 @@ class BasePermission(ABC):
         """
         pass
 
-    async def has_object_permission(self, request: Request, user: UserProtocol, obj: Any) -> bool:
+    async def has_object_permission(
+        self, request: Request, user: UserProtocol, obj: Any
+    ) -> bool:
         """Evaluate if the current user has access to a specific object resource.
 
         Args:
@@ -47,13 +51,11 @@ class BasePermission(ABC):
         return True
 
     async def __call__(
-        self, 
-        request: Request, 
-        user: UserProtocol = Depends(get_current_user_stub)
+        self, request: Request, user: UserProtocol = Depends(get_current_user_stub)
     ) -> UserProtocol:
         """FastAPI Dependency call hook orchestrating standard security assertions.
 
-        Ensures that user identities exist, are marked active, and pass declared 
+        Ensures that user identities exist, are marked active, and pass declared
         permission checks.
 
         Args:
@@ -69,13 +71,13 @@ class BasePermission(ABC):
         """
         if not user:
             raise AuthError(message="Authentication required")
-        
+
         if not user.is_active:
             raise AuthError(message="User is inactive")
-            
+
         if not await self.has_permission(request, user):
             raise ForbiddenError(message="Access denied")
-            
+
         return user
 
 
@@ -104,16 +106,26 @@ class HasScopes(BasePermission):
     async def has_permission(self, request: Request, user: UserProtocol) -> bool:
         """Validate user scopes against the required set of scopes.
 
+        Resolves scopes dynamically from the context scope mapping or user properties.
+
         Args:
             request: The active incoming FastAPI HTTP request.
             user: The user model conforming to UserProtocol.
 
         Returns:
-            True if all required scopes are matching or if the user is a superuser, 
+            True if all required scopes are matching or if the user is a superuser,
             False otherwise.
         """
         if self.allow_superuser and getattr(user, "is_superuser", False):
             return True
-            
-        user_scopes = getattr(user, "all_scopes", set())
+
+        # Dynamically fetch scopes from the requests' ZContext or the user object directly
+        user_scopes = ctx.get("scopes") or getattr(user, "scopes", None) or set()
+
+        # Coerce scope structures to ensure compatible validation checks
+        if isinstance(user_scopes, (list, tuple, frozenset)):
+            user_scopes = set(user_scopes)
+        elif isinstance(user_scopes, str):
+            user_scopes = {user_scopes}
+
         return self.required_scopes.issubset(user_scopes)

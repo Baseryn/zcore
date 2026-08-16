@@ -1,24 +1,26 @@
 """Dynamic Database Search and Filtering Engine.
 
 This module provides a dynamic query-builder that parses client-supplied filters,
-sorting criteria, and relation-preload requests. Crucially, the system coordinates 
-with security context restrictions, intercepting and blocking queries that target 
+sorting criteria, and relation-preload requests. Crucially, the system coordinates
+with security context restrictions, intercepting and blocking queries that target
 unauthorized fields or database relations.
 """
 
 from __future__ import annotations
-import uuid
-from datetime import datetime, date
-from typing import Any, List, Optional, Literal, Type, TypeVar, Dict, Callable, Set
-from pydantic import BaseModel, Field
 
-from sqlalchemy import select, asc, desc, inspect, or_, and_
+import uuid
+from collections.abc import Callable
+from datetime import date, datetime
+from typing import Any, Literal, TypeVar
+
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, asc, desc, inspect, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
+from zcore.context.context import ctx
 from zcore.db.setup import Base
-from zcore.context.context import get_restricted_fields
-from zcore.exceptions.base import ValidationError, ForbiddenError
+from zcore.exceptions.base import ForbiddenError, ValidationError
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -38,10 +40,12 @@ class FilterItem(BaseModel):
             Defaults to None.
     """
 
-    field: Optional[str] = None
-    op: Literal["eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null", "or", "and"]
-    value: Optional[Any] = None
-    items: Optional[List[FilterItem]] = None
+    field: str | None = None
+    op: Literal[
+        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null", "or", "and"
+    ]
+    value: Any | None = None
+    items: list[FilterItem] | None = None
 
 
 class SortItem(BaseModel):
@@ -62,7 +66,7 @@ class SearchRequest(BaseModel):
 
     Attributes:
         filters: A recursive collection of filter constraints. Defaults to an empty list.
-        include: Relationship attributes or dot-paths indicating database relationships 
+        include: Relationship attributes or dot-paths indicating database relationships
             to eager load. Defaults to an empty list.
         sort: Explicit ordering instructions. Defaults to an empty list.
         size: The limit on retrieved records. Defaults to 20.
@@ -70,12 +74,12 @@ class SearchRequest(BaseModel):
         cursor: Keyset pagination indicator. Defaults to None.
     """
 
-    filters: Optional[List[FilterItem]] = []
-    include: Optional[List[str]] = []
-    sort: Optional[List[SortItem]] = []
+    filters: list[FilterItem] | None = []
+    include: list[str] | None = []
+    sort: list[SortItem] | None = []
     size: int = Field(default=20, le=100)
     page: int = 1
-    cursor: Optional[str] = None
+    cursor: str | None = None
 
 
 class SearchEngine:
@@ -91,7 +95,7 @@ class SearchEngine:
         custom_handlers: Custom translation callbacks registered for specific fields.
     """
 
-    def __init__(self, model: Type[ModelType]):
+    def __init__(self, model: type[ModelType]):
         """Initialize the SearchEngine.
 
         Args:
@@ -99,9 +103,11 @@ class SearchEngine:
         """
         self.model = model
         self.mapper = inspect(model)
-        self.custom_handlers: Dict[str, Callable[[Any], Any]] = {}
+        self.custom_handlers: dict[str, Callable[[Any], Any]] = {}
 
-    def register_handler(self, field_name: str, handler: Callable[[Any], Any]) -> SearchEngine:
+    def register_handler(
+        self, field_name: str, handler: Callable[[Any], Any]
+    ) -> SearchEngine:
         """Bind a custom callback handler to parse a specific field's values dynamically.
 
         Args:
@@ -114,7 +120,7 @@ class SearchEngine:
         self.custom_handlers[field_name] = handler
         return self
 
-    def _is_path_restricted(self, path: str, restricted_set: Set[str]) -> bool:
+    def _is_path_restricted(self, path: str, restricted_set: set[str]) -> bool:
         """Assess if a specific database dot-path is restricted by security policies.
 
         Args:
@@ -126,16 +132,16 @@ class SearchEngine:
         """
         if not restricted_set:
             return False
-        
+
         normalized_path = path.lower()
         for restricted in restricted_set:
             normalized_restricted = restricted.lower()
-            
+
             if normalized_path == normalized_restricted:
                 return True
             if normalized_path.startswith(normalized_restricted + "."):
                 return True
-                
+
         return False
 
     def _validate_request(self, search_in: SearchRequest, max_depth: int = 3) -> None:
@@ -147,50 +153,70 @@ class SearchEngine:
 
         Raises:
             ForbiddenError: If access to a requested column or relation is restricted.
-            ValidationError: If inclusion depth exceeds limits or if a requested path 
+            ValidationError: If inclusion depth exceeds limits or if a requested path
                 does not exist on the target schemas.
         """
-        restricted = set(get_restricted_fields())
+        restricted = set(ctx.restricted_fields)
         valid_columns = {col.key for col in self.mapper.columns}
-        
+
         MAX_INCLUDE_DEPTH = 3
         if search_in.include:
             for path in search_in.include:
                 if self._is_path_restricted(path, restricted):
-                    raise ForbiddenError(message=f"Access to relation path '{path}' is restricted due to security policies.")
-                
+                    raise ForbiddenError(
+                        message=f"Access to relation path '{path}' is restricted due to security policies."
+                    )
+
                 parts = path.split(".")
                 if len(parts) > MAX_INCLUDE_DEPTH + 1:
-                    raise ValidationError(message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}.")
-                
+                    raise ValidationError(
+                        message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}."
+                    )
+
                 accumulated_path: list[str] = []
                 for part in parts:
                     accumulated_path.append(part)
                     current_path = ".".join(accumulated_path)
                     if self._is_path_restricted(current_path, restricted):
-                        raise ForbiddenError(message=f"Access to relation path '{current_path}' is restricted.")
-                
+                        raise ForbiddenError(
+                            message=f"Access to relation path '{current_path}' is restricted."
+                        )
+
                 current_model = self.model
                 for part in parts:
                     rel = inspect(current_model).relationships.get(part)
                     if not rel:
-                        raise ValidationError(message=f"Invalid include relation path: '{path}'")
+                        raise ValidationError(
+                            message=f"Invalid include relation path: '{path}'"
+                        )
                     current_model = rel.mapper.class_
 
                 if len(parts) > MAX_INCLUDE_DEPTH:
-                    raise ValidationError(message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}.")
+                    raise ValidationError(
+                        message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}."
+                    )
 
         if search_in.sort:
             for s in search_in.sort:
                 if self._is_path_restricted(s.field, restricted):
-                    raise ForbiddenError(message=f"Sorting by restricted field '{s.field}' is forbidden.")
+                    raise ForbiddenError(
+                        message=f"Sorting by restricted field '{s.field}' is forbidden."
+                    )
                 if s.field not in valid_columns:
-                    raise ValidationError(message=f"Invalid sort field: '{s.field}' on {self.model.__name__}")
+                    raise ValidationError(
+                        message=f"Invalid sort field: '{s.field}' on {self.model.__name__}"
+                    )
 
         if search_in.filters:
-            self._validate_filters_recursive(search_in.filters, valid_columns, restricted, current_depth=1, max_depth=max_depth)
+            self._validate_filters_recursive(
+                search_in.filters,
+                valid_columns,
+                restricted,
+                current_depth=1,
+                max_depth=max_depth,
+            )
 
-    def _validate_filter_field(self, field_path: str, restricted: Set[str]) -> None:
+    def _validate_filter_field(self, field_path: str, restricted: set[str]) -> None:
         """Ensure a single filter field path exists and does not violate access policies.
 
         Args:
@@ -203,32 +229,38 @@ class SearchEngine:
         """
         parts = field_path.split(".")
         current_model = self.model
-        
+
         accumulated_path: list[str] = []
         for i, part in enumerate(parts):
             accumulated_path.append(part)
             current_path = ".".join(accumulated_path)
-            
+
             if self._is_path_restricted(current_path, restricted):
-                raise ForbiddenError(message=f"Filtering by restricted path '{current_path}' is forbidden.")
-            
+                raise ForbiddenError(
+                    message=f"Filtering by restricted path '{current_path}' is forbidden."
+                )
+
             if i == len(parts) - 1:
                 valid_columns = {col.key for col in inspect(current_model).columns}
                 if part not in valid_columns:
-                    raise ValidationError(message=f"Invalid filter field: '{part}' on {current_model.__name__}")
+                    raise ValidationError(
+                        message=f"Invalid filter field: '{part}' on {current_model.__name__}"
+                    )
             else:
                 rel = inspect(current_model).relationships.get(part)
                 if not rel:
-                    raise ValidationError(message=f"Invalid filter relation: '{part}' on {current_model.__name__}")
+                    raise ValidationError(
+                        message=f"Invalid filter relation: '{part}' on {current_model.__name__}"
+                    )
                 current_model = rel.mapper.class_
 
     def _validate_filters_recursive(
-        self, 
-        filters: List[FilterItem], 
-        valid_columns: Set[str], 
-        restricted: Set[str], 
-        current_depth: int, 
-        max_depth: int
+        self,
+        filters: list[FilterItem],
+        valid_columns: set[str],
+        restricted: set[str],
+        current_depth: int,
+        max_depth: int,
     ) -> None:
         """Recursively validate a list of search filters.
 
@@ -243,12 +275,16 @@ class SearchEngine:
             ValidationError: If the query filter structure exceeds nesting thresholds.
         """
         if current_depth > max_depth:
-            raise ValidationError(message="Search query filter structure is too complex.")
+            raise ValidationError(
+                message="Search query filter structure is too complex."
+            )
 
         for f in filters:
             if f.op in ["or", "and"]:
                 if f.items:
-                    self._validate_filters_recursive(f.items, valid_columns, restricted, current_depth + 1, max_depth)
+                    self._validate_filters_recursive(
+                        f.items, valid_columns, restricted, current_depth + 1, max_depth
+                    )
             else:
                 if f.field:
                     self._validate_filter_field(f.field, restricted)
@@ -289,7 +325,9 @@ class SearchEngine:
 
         return self._build_expression_for_field(self.model, f.field, f.op, f.value)
 
-    def _build_expression_for_field(self, current_model: Any, field_path: str, op: str, value: Any) -> Any:
+    def _build_expression_for_field(
+        self, current_model: Any, field_path: str, op: str, value: Any
+    ) -> Any:
         """Recursively resolve comparison expressions for single or dot-path relations.
 
         Args:
@@ -318,7 +356,9 @@ class SearchEngine:
         target_model = rel.mapper.class_
         remaining_path = ".".join(parts[1:])
 
-        sub_expr = self._build_expression_for_field(target_model, remaining_path, op, value)
+        sub_expr = self._build_expression_for_field(
+            target_model, remaining_path, op, value
+        )
         if sub_expr is None:
             return None
 
@@ -340,25 +380,25 @@ class SearchEngine:
         """
         if value is None:
             return value
-            
+
         if isinstance(value, (list, tuple)):
             return [self._coerce_value(col, v) for v in value]
 
         try:
             python_type = col.type.python_type
-            
+
             if python_type is date and isinstance(value, str):
                 return date.fromisoformat(value.split("T")[0])
-                
+
             if python_type is datetime and isinstance(value, str):
                 return datetime.fromisoformat(value)
-                
+
             if python_type is uuid.UUID and isinstance(value, str):
                 return uuid.UUID(value)
-                
+
             if python_type is bool and isinstance(value, str):
                 return value.lower() in ("true", "1", "yes", "t", "y")
-                
+
         except (NotImplementedError, AttributeError, ValueError, TypeError):
             pass
 
@@ -375,13 +415,13 @@ class SearchEngine:
         Returns:
             The generated comparison clause, or None if unsupported.
         """
-        if op == "is_null": 
+        if op == "is_null":
             return col.is_(None) if value else col.isnot(None)
 
-        if op == "ilike": 
+        if op == "ilike":
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"%{escaped_value}%", escape="\\")
-            
+
         coerced_value = self._coerce_value(col, value)
 
         if op == "eq":
@@ -396,13 +436,17 @@ class SearchEngine:
             return col >= coerced_value
         if op == "le":
             return col <= coerced_value
-        
-        if op == "in": 
-            return col.in_(coerced_value if isinstance(coerced_value, (list, tuple)) else [coerced_value])
-        
+
+        if op == "in":
+            return col.in_(
+                coerced_value
+                if isinstance(coerced_value, (list, tuple))
+                else [coerced_value]
+            )
+
         return None
 
-    def _apply_includes(self, query: Select, include_paths: List[str]) -> Select:
+    def _apply_includes(self, query: Select, include_paths: list[str]) -> Select:
         """Configure relation loader strategies on the Select query.
 
         Args:
@@ -413,31 +457,35 @@ class SearchEngine:
             The query configured with appropriate relation loader options.
         """
         unique_paths = sorted(list(set(include_paths)), key=len)
-        
+
         for path in unique_paths:
             parts = path.split(".")
             loader = None
             current_model = self.model
-            
+
             for i, part in enumerate(parts):
                 rel = inspect(current_model).relationships.get(part)
-                if not rel: 
+                if not rel:
                     break
-                
+
                 load_method_name = selectinload if rel.uselist else joinedload
                 if i == 0:
                     load_func = selectinload if rel.uselist else joinedload
                     loader = load_func(getattr(current_model, part))
                 else:
-                    loader = getattr(loader, load_method_name.__name__)(getattr(current_model, part))
-                
+                    loader = getattr(loader, load_method_name.__name__)(
+                        getattr(current_model, part)
+                    )
+
                 current_model = rel.mapper.class_
-            
+
             if loader:
                 query = query.options(loader)
         return query
 
-    def build_base_query(self, search_in: SearchRequest, base_query: Optional[Select] = None) -> Select:
+    def build_base_query(
+        self, search_in: SearchRequest, base_query: Select | None = None
+    ) -> Select:
         """Parse search inputs, validate policies, and construct the base Select statement.
 
         Args:
@@ -445,13 +493,13 @@ class SearchEngine:
             base_query: Optional base Select query statement to extend. Defaults to None.
 
         Returns:
-            A secure, compiled SQLAlchemy SELECT statement complete with filtering, 
+            A secure, compiled SQLAlchemy SELECT statement complete with filtering,
             eager loading joins, and sorting options.
         """
         self._validate_request(search_in)
-        
+
         query = base_query if base_query is not None else select(self.model)
-        
+
         if search_in.include:
             query = self._apply_includes(query, search_in.include)
 

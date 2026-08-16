@@ -1,10 +1,11 @@
 """Unified API Response Envelope.
 
-This module provides the generic `ResponseWrapper` schema, which formats both 
+This module provides the generic `ResponseWrapper` schema, which formats both
 success and failure API responses consistently across the ZCore framework.
 """
 
-from typing import Generic, TypeVar, Optional, Any
+from typing import Any, Generic, TypeVar
+
 from zcore.web.projection import Zchema
 
 T = TypeVar("T")
@@ -24,11 +25,13 @@ class ResponseWrapper(Zchema, Generic[T]):
 
     success: bool = True
     message: str = "Success"
-    data: Optional[T] = None
-    meta: Optional[dict[str, Any]] = None
+    data: T | None = None
+    meta: dict[str, Any] | None = None
 
     @classmethod
-    def success_response(cls, data: T, message: str = "Success", meta: dict = None) -> "ResponseWrapper[T]":
+    def success_response(
+        cls, data: T, message: str = "Success", meta: dict | None = None
+    ) -> "ResponseWrapper[T]":
         """Construct a successful ResponseWrapper instance.
 
         Args:

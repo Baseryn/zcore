@@ -1,12 +1,13 @@
 """Storage Provider Base Interface.
 
-This module defines the primary storage contract for the ZCore framework, facilitating 
-file uploads, raw binary streaming, and secure asset deletions. It also provides 
+This module defines the primary storage contract for the ZCore framework, facilitating
+file uploads, raw binary streaming, and secure asset deletions. It also provides
 a FastAPI dependency stub to dynamically resolve storage providers from the IoC container.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from fastapi import UploadFile
 
 from zcore.kernel.di import Inject
@@ -15,7 +16,7 @@ from zcore.kernel.di import Inject
 class StorageProvider(ABC):
     """Abstract Base Class specifying standard storage platform capabilities.
 
-    Implementations must inherit from this class to manage file operations (e.g., local 
+    Implementations must inherit from this class to manage file operations (e.g., local
     filesystems, AWS S3, or Google Cloud Storage) within the ZCore framework.
     """
 
@@ -34,10 +35,7 @@ class StorageProvider(ABC):
 
     @abstractmethod
     async def upload_stream(
-        self, 
-        file_stream: AsyncGenerator[bytes, None], 
-        filename: str, 
-        folder: str
+        self, file_stream: AsyncGenerator[bytes, None], filename: str, folder: str
     ) -> str:
         """Stream binary raw chunks directly to the storage platform.
 
@@ -64,9 +62,7 @@ class StorageProvider(ABC):
         pass
 
 
-async def get_storage_provider(
-    provider: StorageProvider = Inject(StorageProvider)
-) -> StorageProvider:
+async def get_storage_provider(provider: Inject[StorageProvider]) -> StorageProvider:
     """FastAPI dependency to resolve the active storage provider.
 
     Args:

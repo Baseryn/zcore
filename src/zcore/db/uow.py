@@ -1,13 +1,15 @@
 """Unit of Work Pattern Implementation.
 
-This module coordinates transactional business boundaries, ensuring that change sets 
+This module coordinates transactional business boundaries, ensuring that change sets
 are executed or discarded atomically and that domain events are decoupled from commit
 operations by delaying dispatch until database transactions succeed.
 """
 
+from typing import Any
+
 import structlog
-from typing import Any, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from zcore.kernel.events import EventDispatcher
 
 logger = structlog.get_logger()
@@ -16,14 +18,14 @@ logger = structlog.get_logger()
 class UnitOfWork:
     """Coordinates database commits and buffers associated application domain events.
 
-    Ensures that domain events are only dispatched after their associated database 
-    modifications have successfully committed. Implements the asynchronous context manager 
+    Ensures that domain events are only dispatched after their associated database
+    modifications have successfully committed. Implements the asynchronous context manager
     protocol to automate transactional commit and rollback behaviors.
 
     Attributes:
         session: The underlying asynchronous database connection.
         dispatcher: The central system dispatcher used for publishing events.
-        _pending_events: A list of buffered tuple events (event_name, payload) awaiting 
+        _pending_events: A list of buffered tuple events (event_name, payload) awaiting
             successful commit.
     """
 
@@ -36,7 +38,7 @@ class UnitOfWork:
         """
         self.session = session
         self.dispatcher = dispatcher
-        self._pending_events: List[Tuple[str, Any]] = []
+        self._pending_events: list[tuple[str, Any]] = []
 
     def register_event(self, event_name: str, payload: Any) -> None:
         """Queue a domain event for post-commit dispatch.
@@ -51,7 +53,7 @@ class UnitOfWork:
         """Commit the database session and dispatch all pending events.
 
         This method attempts to commit the database session. If the commit succeeds,
-        buffered domain events are popped and dispatched. If the commit fails, the 
+        buffered domain events are popped and dispatched. If the commit fails, the
         session is rolled back and the original database exception is raised.
 
         Raises:
@@ -71,8 +73,8 @@ class UnitOfWork:
                 await self.dispatcher.dispatch(event_name, payload)
             except Exception as ex:
                 logger.error(
-                    f"UnitOfWork event handler failed for event '{event_name}': {ex}", 
-                    exc_info=True
+                    f"UnitOfWork event handler failed for event '{event_name}': {ex}",
+                    exc_info=True,
                 )
 
     async def rollback(self) -> None:
@@ -83,7 +85,7 @@ class UnitOfWork:
     async def __aenter__(self) -> "UnitOfWork":
         """Enter the asynchronous context manager block.
 
-        Configures the session metadata to signify it is now managed within a 
+        Configures the session metadata to signify it is now managed within a
         Unit of Work lifecycle boundary.
 
         Returns:
@@ -95,7 +97,7 @@ class UnitOfWork:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Exit the asynchronous context manager block.
 
-        Automatically performs a rollback if an unhandled exception is encountered, 
+        Automatically performs a rollback if an unhandled exception is encountered,
         or commits the transaction otherwise.
 
         Args:

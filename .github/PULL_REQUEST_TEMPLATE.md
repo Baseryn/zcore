@@ -16,7 +16,7 @@ Fixes # (issue number)
 
 Please describe the tests that you ran to verify your changes.
 
-- [ ] Unit/Integration tests (`hatch run test`)
+- [ ] Unit/Integration tests (`hatch test`)
 - [ ] Static type check passing (`mypy src/`)
 
 ## Checklist:
@@ -25,6 +25,6 @@ Please describe the tests that you ran to verify your changes.
 - [ ] I have performed a self-review of my own code
 - [ ] My changes pass strict static type analysis (`mypy src/` generates no warnings)
 - [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation (under `docs/`)
+- [ ] I have updated the documentation in `zcore-docs` if applicable
 - [ ] My changes generate no new runtime warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works

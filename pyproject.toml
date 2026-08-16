@@ -50,15 +50,6 @@ crypto = [
     "argon2-cffi>=23.1.0",
     "pyjwt>=2.8.0",
 ]
-docs = [
-    "mkdocs>=1.5.0",
-    "mkdocs-shadcn", 
-    "mkdocs-material>=9.5.0",
-    "mkdocstrings[python]>=0.24.0",
-    "mkdocs-gen-files>=0.5.0",
-    "mkdocs-literate-nav>=0.6.0",
-    "mkdocs-section-index>=0.3.0"
-]
 all = [
     "sqlalchemy[asyncio]>=2.0.28",
     "aiosqlite>=0.20.0",
@@ -69,10 +60,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fastapi-zcore-framework/zcore"
-Repository = "https://github.com/fastapi-zcore-framework/zcore"
-Documentation = "https://fastapi-zcore-framework.github.io/zcore"
-"Bug Tracker" = "https://github.com/fastapi-zcore-framework/zcore/issues"
+Homepage = "https://github.com/Baseryn/zcore"
+Repository = "https://github.com/Baseryn/zcore"
+Documentation = "https://baseryn.github.io/zcore-docs/"
+"Bug Tracker" = "https://github.com/Baseryn/zcore/issues"
 
 [project.scripts]
 zc = "zcore.cli:main"
@@ -95,6 +86,24 @@ extra-dependencies = [
 ]
 features = [
     'all'
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # Line too long (managed automatically by formatter)
+    "B008",   # Do not perform function call Depends in argument defaults (FastAPI standard)
+    "B024",   # Base class has no abstract methods
+    "B039",   # ContextVar mutable default
+    "B904",   # Use raise from in except clauses
+    "BLE001", # Do not catch blind exception Exception
+    "TRY201", # Use raise without specifying exception name
+    "PYI036", # The argument in __aexit__ should be annotated
+    "SIM102", # Nested if statements
 ]
 
 [tool.mypy]

@@ -12,7 +12,7 @@ from zcore.db.setup import Base, db_manager, get_db
 from zcore.kernel.di import container, _current_scope_id
 from zcore.kernel.engine import Kernel
 from zcore.cache.base import close_cache
-from zcore.config import ZCoreCoreSettings, initialize_settings
+from zcore.config import Settings, initialize_settings
 
 class MockSessionContext:
     def __init__(self, session: AsyncSession) -> None:
@@ -124,10 +124,9 @@ def reset_di_container(test_db_url: str, test_storage_dir: str) -> Generator[Non
     container._constructor_cache.clear()
     container._dependency_signature_cache.clear()
     _current_scope_id.set(None)
-    test_settings = ZCoreCoreSettings(
+    test_settings = Settings(
         DATABASE_URL=test_db_url,
         SECRET_KEY=os.getenv("TEST_SECRET_KEY", "test-secret-key-12345678901234567890123456789012"),
-        ENVIRONMENT="testing",
         STORAGE_PATH=test_storage_dir
     )
     initialize_settings(test_settings)

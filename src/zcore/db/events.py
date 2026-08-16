@@ -1,12 +1,14 @@
 """Database Lifecycle Event Dispatcher.
 
 This module provides a secure bridge between database operations and the core application
-event dispatcher. It ensures that transactional and lifecycle events can be dispatched 
+event dispatcher. It ensures that transactional and lifecycle events can be dispatched
 safely without blocking synchronous execution paths or greenlets.
 """
 
-import structlog
 from typing import Any
+
+import structlog
+
 from zcore.kernel.events import EventDispatcher
 
 logger = structlog.get_logger()
@@ -17,7 +19,7 @@ _global_dispatcher: EventDispatcher | None = None
 def register_db_event_dispatcher(dispatcher: EventDispatcher) -> None:
     """Register the global event dispatcher instance for database lifecycle events.
 
-    This function configures the central event dispatcher used by database modules to 
+    This function configures the central event dispatcher used by database modules to
     notify downstream systems of transactional changes or lifecycle transitions.
 
     Args:
@@ -30,7 +32,7 @@ def register_db_event_dispatcher(dispatcher: EventDispatcher) -> None:
 async def dispatch_db_event(event_name: str, payload: Any) -> None:
     """Safely dispatch database lifecycle events within the active async event loop.
 
-    This function dispatches database events asynchronously, catching and logging any 
+    This function dispatches database events asynchronously, catching and logging any
     exceptions encountered during execution to safeguard calling databases from handler failures.
 
     Args:
@@ -42,4 +44,6 @@ async def dispatch_db_event(event_name: str, payload: Any) -> None:
     try:
         await _global_dispatcher.dispatch(event_name, payload)
     except Exception as e:
-        logger.error(f"Failed to dispatch database event '{event_name}': {e}", exc_info=True)
+        logger.error(
+            f"Failed to dispatch database event '{event_name}': {e}", exc_info=True
+        )

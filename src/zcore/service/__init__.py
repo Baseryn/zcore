@@ -1,6 +1,6 @@
-from zcore.service.base import BaseService, AbstractService
+from zcore.service.base import AbstractService, BaseService
 
 __all__ = [
-    "BaseService",
     "AbstractService",
+    "BaseService",
 ]

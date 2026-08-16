@@ -1,157 +1,177 @@
-"""ZCore Thread and Coroutine Context Management.
+"""
+ZCore Context Management Module.
 
-This module provides thread-local and coroutine-safe state storage using Python's 
-`contextvars` library. It tracks the current authenticated user identifier and any 
-restricted data fields configured on the active execution context. It manages these 
-parameters across asynchronous task boundaries to prevent concurrent state pollution.
+This module provides a robust, thread-safe, and coroutine-aware context storage
+system using Python's `contextvars` library. It is designed to manage
+request-scoped state, such as authentication identifiers and security filters,
+ensuring state isolation across asynchronous task boundaries and preventing
+leaks between concurrent executions.
 """
 
 import uuid
-from contextvars import ContextVar, Token
-from typing import Generator, Union
+from collections.abc import Iterable
 from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from typing import Any
 
-# Safe context variables scoped to the current asynchronous execution context
-_current_user_id: ContextVar[Union[uuid.UUID, None]] = ContextVar("user_id", default=None)
-_restricted_fields: ContextVar[Union[frozenset[str], None]] = ContextVar("restricted_fields", default=None)
+_request_context_store: ContextVar[dict[str, Any]] = ContextVar(
+    "request_context_store", default={}
+)
 
 
-def set_current_user_id(user_id: Union[uuid.UUID, str, None]) -> Token[Union[uuid.UUID, None]]: 
-    """Set the current authenticated user's identifier in the execution context.
-
-    Converts string-based UUID parameters into formal `uuid.UUID` class instances 
-    immediately to ensure downstream type integrity and avoid resolution errors.
-
-    Args:
-        user_id: The identifier to set in the context. Can be a pre-constructed 
-            `uuid.UUID` instance, a valid UUID string, or None to clear the active context.
-
-    Returns:
-        A context token representing the previous state, used to restore context 
-        boundaries later.
-
-    Raises:
-        ValueError: If a string-based parameter is not a valid UUID string representation.
-        TypeError: If the parameter is not a `uuid.UUID` object, a string, or None.
+class ZContext:
     """
-    if user_id is None:
-        return _current_user_id.set(None)
-        
-    if isinstance(user_id, str):
+    Unified interface for managing asynchronous execution contexts.
+
+    Encapsulates the logic for storing and retrieving scoped data. This class
+    supports dynamic key-value storage while providing strongly-typed properties
+    for common framework-level attributes like user identity and data restrictions.
+    """
+
+    @classmethod
+    def set(cls, key: str, value: Any) -> None:
+        """
+        Stores a value in the current execution context.
+
+        Args:
+            key: The unique identifier for the context entry.
+            value: The data to persist in the current scope.
+        """
+        current_store = _request_context_store.get()
+        new_store = dict(current_store)
+        new_store[key] = value
+        _request_context_store.set(new_store)
+
+    @classmethod
+    def get(cls, key: str, default: Any = None) -> Any:
+        """
+        Retrieves a value from the current execution context.
+
+        Args:
+            key: The identifier for the requested context entry.
+            default: The fallback value if the key is not found.
+
+        Returns:
+            The associated value or the specified default.
+        """
+        return _request_context_store.get().get(key, default)
+
+    @classmethod
+    def remove(cls, key: str) -> None:
+        """
+        Deletes a specific entry from the current execution context.
+
+        Args:
+            key: The identifier to be removed from the context store.
+        """
+        current_store = _request_context_store.get()
+        if key in current_store:
+            new_store = dict(current_store)
+            new_store.pop(key, None)
+            _request_context_store.set(new_store)
+
+    @classmethod
+    def initialize(cls) -> Token[dict[str, Any]]:
+        """
+        Resets the context store to an empty state for the current scope.
+
+        Returns:
+            A contextvars Token used for restoring the previous state.
+        """
+        return _request_context_store.set({})
+
+    @classmethod
+    def reset(cls, token: Token[dict[str, Any]]) -> None:
+        """
+        Restores the context store to a state corresponding to the provided token.
+
+        Args:
+            token: A valid token returned by a previous context operation.
+        """
+        _request_context_store.reset(token)
+
+    @property
+    def user_id(self) -> uuid.UUID | None:
+        """
+        Retrieves the authenticated user identifier from the current context.
+
+        Returns:
+            The user's UUID if authenticated, otherwise None.
+        """
+        return self.get("user_id")
+
+    @user_id.setter
+    def user_id(self, value: uuid.UUID | str | None) -> None:
+        """
+        Sets and validates the user identifier for the current context.
+
+        Args:
+            value: A UUID instance, a valid UUID string, or None to clear.
+
+        Raises:
+            ValueError: If a string input is not a valid UUID format.
+            TypeError: If the input type is unsupported.
+        """
+        if value is None:
+            self.set("user_id", None)
+            return
+
+        if isinstance(value, str):
+            try:
+                validated_id = uuid.UUID(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid UUID string: '{value}'") from e
+        elif isinstance(value, uuid.UUID):
+            validated_id = value
+        else:
+            raise TypeError("user_id must be a uuid.UUID, a valid UUID string, or None")
+
+        self.set("user_id", validated_id)
+
+    @property
+    def restricted_fields(self) -> frozenset[str]:
+        """
+        Accesses the collection of data fields restricted in the current context.
+
+        Returns:
+            An immutable frozenset of restricted field paths.
+        """
+        return self.get("restricted_fields", frozenset())
+
+    @restricted_fields.setter
+    def restricted_fields(self, value: Iterable[str] | None) -> None:
+        """
+        Updates the restricted fields, ensuring immutability through frozenset.
+
+        Args:
+            value: An iterable of field paths or None to clear restrictions.
+        """
+        if value is None:
+            self.set("restricted_fields", frozenset())
+        else:
+            self.set("restricted_fields", frozenset(value))
+
+    @contextmanager
+    def scope(self, **kwargs: Any) -> Any:
+        """
+        Context manager for localized state overrides within a block.
+
+        Args:
+            **kwargs: Attributes to set temporarily in the context.
+
+        Yields:
+            None
+        """
+        token = _request_context_store.set(dict(_request_context_store.get()))
         try:
-            validated_id = uuid.UUID(user_id)
-        except ValueError as e:
-            raise ValueError(f"Invalid UUID string provided to context: '{user_id}'") from e
-    elif isinstance(user_id, uuid.UUID):
-        validated_id = user_id
-    else:
-        raise TypeError("user_id must be an instance of uuid.UUID, a valid UUID string, or None")
-
-    return _current_user_id.set(validated_id)
-
-
-def get_current_user_id() -> Union[uuid.UUID, None]:
-    """Retrieve the current user identifier from the active execution context.
-
-    Returns:
-        The active user's UUID, or None if the current context is unauthenticated.
-    """
-    return _current_user_id.get()
+            for key, value in kwargs.items():
+                if hasattr(self, key):
+                    setattr(self, key, value)
+                else:
+                    self.set(key, value)
+            yield
+        finally:
+            _request_context_store.reset(token)
 
 
-def set_restricted_fields(
-    fields: Union[set[str], list[str], frozenset[str], None]
-) -> Token[Union[frozenset[str], None]]:
-    """Configure the restricted data fields for the active execution context.
-
-    Converts raw sequence parameters (lists or standard sets) into immutable `frozenset` 
-    structures to enforce mutation-safe isolation and prevent accidental leaks.
-
-    Args:
-        fields: A collection of blocked field dot-paths, or None to clear active restrictions.
-
-    Returns:
-        A context token representing the previous state, used to restore context 
-        boundaries later.
-    """
-    if fields is None:
-        return _restricted_fields.set(None)
-    
-    # Store as frozenset to guarantee thread-safe and mutation-safe isolation
-    frozen_fields = frozenset(fields)
-    return _restricted_fields.set(frozen_fields)
-
-
-def get_restricted_fields() -> frozenset[str]:
-    """Retrieve the set of restricted fields configured on the active execution context.
-
-    Returns:
-        An immutable frozenset containing field dot-paths blocked from being loaded 
-        by query builders or exposed by response projection utilities.
-    """
-    val = _restricted_fields.get()
-    if val is None:
-        return frozenset()
-    return val
-
-
-@contextmanager
-def user_context(user_id: Union[uuid.UUID, str, None]) -> Generator[None, None, None]:
-    """Context manager to safely bind and restore a user identifier.
-
-    Args:
-        user_id: The target identifier to set. Accepts UUID instances, string 
-            representations, or None.
-
-    Yields:
-        None.
-    """
-    token = set_current_user_id(user_id)
-    try:
-        yield
-    finally:
-        _current_user_id.reset(token)
-
-
-@contextmanager
-def restricted_fields_context(
-    fields: Union[set[str], list[str], frozenset[str], None]
-) -> Generator[None, None, None]:
-    """Context manager to safely bind and restore restricted fields.
-
-    Args:
-        fields: A collection of blocked field paths to bind to the active block.
-
-    Yields:
-        None.
-    """
-    token = set_restricted_fields(fields)
-    try:
-        yield
-    finally:
-        _restricted_fields.reset(token)
-
-
-@contextmanager
-def request_context(
-    user_id: Union[uuid.UUID, str, None], 
-    fields: Union[set[str], list[str], frozenset[str], None]
-) -> Generator[None, None, None]:
-    """Compound context manager to cleanly coordinate both user and restricted field states.
-
-    Designed to handle context setups and teardowns atomically during HTTP request lifecycles.
-
-    Args:
-        user_id: The target identifier to bind.
-        fields: The restricted field path collection to bind.
-
-    Yields:
-        None.
-    """
-    user_token = set_current_user_id(user_id)
-    fields_token = set_restricted_fields(fields)
-    try:
-        yield
-    finally:
-        _current_user_id.reset(user_token)
-        _restricted_fields.reset(fields_token)
+ctx = ZContext()
