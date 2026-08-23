@@ -20,7 +20,7 @@ from typing import (
     get_origin,
     get_type_hints,
 )
-
+from anyio import to_thread
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -317,23 +317,29 @@ async def background_scope(
 ) -> AsyncGenerator[None, None]:
     """Provide an isolated IoC, Database Session, and ZContext scope for background tasks.
 
-    Ensures that async background routines execute within an independent transaction
-    boundary without interfering with or relying upon completed HTTP request scopes.
+    Ensures that asynchronous background routines execute within an independent transaction
+    boundary and IoC scope without relying on or interfering with completed HTTP request lifecycles.
+    Automatically manages database session allocation, context variable isolation, and guaranteed
+    resource disposal upon exit.
 
     Args:
-        inherit_context: If True, propagates user_id and context from the caller request.
-        **custom_context: Explicit context key-values to set in the background scope.
+        inherit_context: If True, clones active request context parameters (e.g., user_id, scopes)
+            into the background scope. Defaults to True.
+        **custom_context: Explicit key-value pairs to set or override in the background context store.
+
+    Yields:
+        None within an active, isolated execution scope.
     """
     from zcore.context.context import _request_context_store
     from zcore.db.setup import db_manager
-    
+
     scope_id = str(uuid.uuid4())
     scope_token = _current_scope_id.set(scope_id)
-    
+
     initial_store = dict(_request_context_store.get()) if inherit_context else {}
     initial_store.update(custom_context)
     ctx_token = _request_context_store.set(initial_store)
-    
+
     try:
         async with db_manager.session() as session:
             container.register_scoped_instance(AsyncSession, session)
@@ -346,23 +352,39 @@ async def background_scope(
 
 def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator that wraps a background task with an isolated scope and auto-resolves dependencies.
-    
-    Supports both async coroutines and standard synchronous functions.
+
+    Inspects the wrapped function's signature and automatically resolves any unprovided,
+    type-annotated parameters directly from the global IoC container. Supports both asynchronous
+    coroutines and standard synchronous functions (executed asynchronously in a worker threadpool).
+
+    Args:
+        func: The target synchronous or asynchronous callable to execute in the background.
+
+    Returns:
+        An asynchronous wrapped callable suitable for scheduling with FastAPI BackgroundTasks.
     """
-    
     is_coroutine = inspect.iscoroutinefunction(func)
-    
-    def _resolve_injections(args: tuple, kwargs: dict) -> dict:
+
+    def _resolve_injections(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
         sig = inspect.signature(func)
         bound_args = sig.bind_partial(*args, **kwargs)
         resolved_kwargs = dict(kwargs)
-        
+
         for param_name, param in sig.parameters.items():
-            if param_name not in bound_args.arguments and param.annotation is not inspect.Parameter.empty:
-                resolved_kwargs[param_name] = container.resolve(param.annotation)
-                
+            if param_name in bound_args.arguments:
+                continue
+            if param.default is not inspect.Parameter.empty:
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            if param.annotation is not inspect.Parameter.empty:
+                annotation = param.annotation
+                if get_origin(annotation) is Annotated:
+                    annotation = get_args(annotation)[0]
+                resolved_kwargs[param_name] = container.resolve(annotation)
+
         return resolved_kwargs
-    
+
     if is_coroutine:
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -373,9 +395,11 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
         return async_wrapper
     else:
         @functools.wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            with background_scope():
+        async def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async with background_scope():
                 final_kwargs = _resolve_injections(args, kwargs)
-                return func(*args, **final_kwargs)
+                return await to_thread.run_sync(
+                    functools.partial(func, *args, **final_kwargs)
+                )
 
         return sync_wrapper
