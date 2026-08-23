@@ -6,8 +6,11 @@ to mitigate reflection runtime performance overhead, and implements protective m
 against cyclic dependencies.
 """
 
+import functools
 import inspect
-from collections.abc import Callable
+import uuid
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import (
     Annotated,
@@ -19,6 +22,7 @@ from typing import (
 )
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 T = TypeVar("T")
 
@@ -304,3 +308,74 @@ class Inject:
             An Annotated type wrapper containing the resolved target class.
         """
         return Annotated[interface, Depends(Injector(interface))]
+
+
+@asynccontextmanager
+async def background_scope(
+    inherit_context: bool = True,
+    **custom_context: Any,
+) -> AsyncGenerator[None, None]:
+    """Provide an isolated IoC, Database Session, and ZContext scope for background tasks.
+
+    Ensures that async background routines execute within an independent transaction
+    boundary without interfering with or relying upon completed HTTP request scopes.
+
+    Args:
+        inherit_context: If True, propagates user_id and context from the caller request.
+        **custom_context: Explicit context key-values to set in the background scope.
+    """
+    from zcore.context.context import _request_context_store
+    from zcore.db.setup import db_manager
+    
+    scope_id = str(uuid.uuid4())
+    scope_token = _current_scope_id.set(scope_id)
+    
+    initial_store = dict(_request_context_store.get()) if inherit_context else {}
+    initial_store.update(custom_context)
+    ctx_token = _request_context_store.set(initial_store)
+    
+    try:
+        async with db_manager.session() as session:
+            container.register_scoped_instance(AsyncSession, session)
+            yield
+    finally:
+        container.clear_scope(scope_id)
+        _current_scope_id.reset(scope_token)
+        _request_context_store.reset(ctx_token)
+
+
+def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that wraps a background task with an isolated scope and auto-resolves dependencies.
+    
+    Supports both async coroutines and standard synchronous functions.
+    """
+    
+    is_coroutine = inspect.iscoroutinefunction(func)
+    
+    def _resolve_injections(args: tuple, kwargs: dict) -> dict:
+        sig = inspect.signature(func)
+        bound_args = sig.bind_partial(*args, **kwargs)
+        resolved_kwargs = dict(kwargs)
+        
+        for param_name, param in sig.parameters.items():
+            if param_name not in bound_args.arguments and param.annotation is not inspect.Parameter.empty:
+                resolved_kwargs[param_name] = container.resolve(param.annotation)
+                
+        return resolved_kwargs
+    
+    if is_coroutine:
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async with background_scope():
+                final_kwargs = _resolve_injections(args, kwargs)
+                return await func(*args, **final_kwargs)
+
+        return async_wrapper
+    else:
+        @functools.wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            with background_scope():
+                final_kwargs = _resolve_injections(args, kwargs)
+                return func(*args, **final_kwargs)
+
+        return sync_wrapper
