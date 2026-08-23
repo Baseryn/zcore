@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select, func, inspect, select, insert, update
+from sqlalchemy import Select, func, inspect, select, insert, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.interfaces import ExecutableOption
@@ -346,11 +346,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        records = await self.get_by_ids(ids=ids)
-        for record in records:
-            await self.db.delete(record)
+        stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+        result = await self.db.scalars(stmt)
         await self.db.flush()
-        return records
+        return list(result.all())
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
