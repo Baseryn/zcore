@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select, func, inspect, select
+from sqlalchemy import Select, func, inspect, select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.interfaces import ExecutableOption
@@ -258,13 +258,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not schemas:
             return []
 
-        records = [self.model(**schema.model_dump()) for schema in schemas]
-        self.db.add_all(records)
+        payloads = [schema.model_dump() for schema in schemas]
+        stmt = insert(self.model).values(payloads).returning(self.model)
+        result = await self.db.execute(stmt)
         await self.db.flush()
-        if refresh:
-            for record in records:
-                await self.db.refresh(record)
-        return records
+        return list(result.scalars().all())
 
     async def update(
         self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
