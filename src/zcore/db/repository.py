@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select, func, inspect, select, insert
+from sqlalchemy import Select, func, inspect, select, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.interfaces import ExecutableOption
@@ -307,21 +307,16 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not data:
             return []
 
-        records = await self.get_by_ids(ids=list(data.keys()))
-        record_map = {getattr(r, self.pk_name): r for r in records}
-        updated_records = []
-        for record_id, schema in data.items():
-            record = record_map.get(record_id)
-            if record:
-                update_data = schema.model_dump(exclude_unset=partial)
-                for field, value in update_data.items():
-                    setattr(record, field, value)
-                updated_records.append(record)
+        payloads: list[dict[str, Any]] = []
+        for pk_val, schema in data.items():
+            dump = schema.model_dump(exclude_unset=partial)
+            dump[self.pk_name] = pk_val
+            payloads.append(dump)
+
+        stmt = update(self.model).returning(self.model)
+        result = await self.db.scalars(stmt, payloads)
         await self.db.flush()
-        if refresh:
-            for record in updated_records:
-                await self.db.refresh(record)
-        return updated_records
+        return list(result.all())
 
     async def delete(self, id: Any) -> ModelType | None:
         """Delete a single record by its primary key identifier.
