@@ -2,9 +2,11 @@ import asyncio
 import time
 import uuid
 from typing import Any
+
 import pytest
 
 from zcore.kernel.events import EventDispatcher, on_event
+
 
 class DummyContainer:
     def __init__(self) -> None:

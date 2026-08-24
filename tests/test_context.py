@@ -1,9 +1,11 @@
-import uuid
 import asyncio
-from typing import Any, Type
+import uuid
+from typing import Any
+
 import pytest
 
-from zcore.context.context import ctx, _request_context_store
+from zcore.context.context import _request_context_store, ctx
+
 
 @pytest.mark.parametrize(
     "user_id_input, expected_output, expected_exception",
@@ -18,7 +20,7 @@ from zcore.context.context import ctx, _request_context_store
 def test_set_current_user_id_validation(
     user_id_input: Any,
     expected_output: uuid.UUID | None,
-    expected_exception: Type[Exception] | None
+    expected_exception: type[Exception] | None
 ) -> None:
     token = _request_context_store.set({})
     try:
@@ -67,8 +69,7 @@ def test_context_managers_cleanup() -> None:
         new_user = uuid.uuid4()
         new_fields = {"password"}
         
-        with pytest.raises(RuntimeError):
-            with ctx.scope(user_id=new_user, restricted_fields=new_fields):
+        with pytest.raises(RuntimeError), ctx.scope(user_id=new_user, restricted_fields=new_fields):
                 assert ctx.user_id == new_user
                 assert ctx.restricted_fields == frozenset(new_fields)
                 raise RuntimeError("Error inside scope")

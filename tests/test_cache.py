@@ -1,14 +1,15 @@
-import asyncio
-import time
 import gc
 import threading
-from typing import Any, Type
+import time
+from typing import Any
 from unittest.mock import AsyncMock
+
 import pytest
 from pydantic import BaseModel
 
-from zcore.cache.base import BaseCache, init_cache, close_cache
+from zcore.cache.base import BaseCache, close_cache, init_cache
 from zcore.cache.ttllru_cache import TTLLRUCache, _active_caches
+
 
 class SampleCachedModel(BaseModel):
     id: int
@@ -95,8 +96,8 @@ async def test_base_cache_redis_fallback(
 )
 async def test_cache_deserialization_types(
     payload: Any,
-    target_type: Type[BaseModel] | None,
-    expected_cls: Type[Any]
+    target_type: type[BaseModel] | None,
+    expected_cls: type[Any]
 ) -> None:
     cache = BaseCache[Any](prefix="typing_test")
     await cache.set("payload_key", payload, ttl=5)
@@ -164,7 +165,7 @@ def test_ttllru_weakref_gc() -> None:
     initial_count = len(list(_active_caches))
     
     def create_temporary_cache() -> None:
-        temp_cache = TTLLRUCache(maxsize=5)
+        _ = TTLLRUCache(maxsize=5)
         assert len(list(_active_caches)) == initial_count + 1
         
     create_temporary_cache()

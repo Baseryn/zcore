@@ -1,16 +1,18 @@
 import uuid
+from collections.abc import Sequence
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from pydantic import BaseModel
-
-from typing import Any, Type, Sequence, Optional
-from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import Column, Integer, String
 
-from zcore.db.setup import Base
-from zcore.db.search import SearchRequest
 from zcore.db.pagination import PaginatedResult
+from zcore.db.search import SearchRequest
+from zcore.db.setup import Base
 from zcore.exceptions.base import EntityNotFound
 from zcore.service.base import BaseService
+
 
 class ServiceTestModel(Base):
     __tablename__ = f"service_test_{uuid.uuid4().hex[:6]}"
@@ -24,7 +26,7 @@ class ServiceTestUpdateSchema(BaseModel):
     name: str
 
 class HookTrackingService(BaseService[ServiceTestModel]):
-    def __init__(self, model: Type[ServiceTestModel], repository: Any) -> None:
+    def __init__(self, model: type[ServiceTestModel], repository: Any) -> None:
         super().__init__(model, repository)
         self.hooks_called: list[str] = []
 
@@ -39,7 +41,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
             m.name = m.name + "_GETMULTIHOCKED"
         return models
 
-    async def pre_create(self, schema: ServiceTestCreateSchema) -> Optional[dict[str, Any]]:
+    async def pre_create(self, schema: ServiceTestCreateSchema) -> dict[str, Any] | None:
         self.hooks_called.append("pre_create")
         schema.name = "HOOKED_" + schema.name
         if schema.name == "HOOKED_Base":
@@ -60,7 +62,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         for m in models:
             m.name = m.name + "_BULKAUDITED"
 
-    async def pre_update(self, id: Any, schema: ServiceTestUpdateSchema, partial: bool) -> Optional[dict[str, Any]]:
+    async def pre_update(self, id: Any, schema: ServiceTestUpdateSchema, partial: bool) -> dict[str, Any] | None:
         self.hooks_called.append("pre_update")
         schema.name = "UPDATED_HOOK_" + schema.name
         return None
@@ -71,7 +73,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
 
     async def pre_update_multi(self, data: dict[Any, BaseModel], partial: bool) -> None:
         self.hooks_called.append("pre_update_multi")
-        for k, v in data.items():
+        for _k, v in data.items():
             v.name = "BULK_UPD_" + v.name
 
     async def post_update_multi(self, models: Sequence[ServiceTestModel]) -> None:

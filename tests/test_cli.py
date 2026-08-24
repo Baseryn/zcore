@@ -1,11 +1,12 @@
 import re
 import sys
-import pytest
-
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from zcore.cli import main
+
 
 @pytest.fixture
 def run_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

@@ -1,10 +1,11 @@
-import uuid
-import pytest
 import datetime
-import pytest_asyncio
+import uuid
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from typing import Any, AsyncGenerator
-from sqlalchemy import Column, DateTime, Integer, String, select, UUID
+import pytest
+import pytest_asyncio
+from sqlalchemy import UUID, Column, DateTime, Integer, String, select
 
 from zcore.db.pagination import (
     CursorPagination,
@@ -14,6 +15,7 @@ from zcore.db.pagination import (
 )
 from zcore.db.setup import Base
 from zcore.exceptions.base import ValidationError
+
 
 class PaginationTestModel(Base):
     __tablename__ = f"pagination_test_{uuid.uuid4().hex[:6]}"
