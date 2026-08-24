@@ -20,6 +20,7 @@ from typing import (
     get_origin,
     get_type_hints,
 )
+
 from anyio import to_thread
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
