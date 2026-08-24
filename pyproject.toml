@@ -30,6 +30,8 @@ dependencies = [
     "jsonschema>=4.21.0",
     "python-multipart>=0.0.9",
     "uvicorn>=0.22.0",
+    "questionary>=2.0.1",
+    "rich>=13.7.0",
 ]
 
 [project.optional-dependencies]
