@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from zcore.db.repository import BaseRepository
     from zcore.db.search import SearchRequest
     from zcore.db.setup import Base, SessionDep, db_manager, get_db
+    from zcore.db.soft_delete import SoftDeleteMixin
     from zcore.db.uow import UnitOfWork
     from zcore.kernel.di import Inject, container
     from zcore.kernel.engine import Kernel
@@ -35,6 +36,7 @@ __all__ = [
     "SearchRequest",
     "Security",
     "SessionDep",
+    "SoftDeleteMixin",
     "UnitOfWork",
     "ZContext",
     "ZCoreAPIRoute",
@@ -141,5 +143,10 @@ def __getattr__(name: str) -> Any:
         from zcore.kernel.events import EventDispatcher
 
         return EventDispatcher
+    
+    if name == "SoftDeleteMixin":
+        from zcore.db.soft_delete import SoftDeleteMixin
+
+        return SoftDeleteMixin
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
