@@ -175,8 +175,8 @@ def test_search_restricted_field_bypass(field_variant: str) -> None:
         (["post"], None, ""),
         (["post.profile"], None, ""),
         (["post.profile.user"], None, ""),
-        (["post.profile.user.non_existent"], ValidationError, "Invalid include relation path"),
-        (["post.profile.user.bio.extra"], ValidationError, "exceeds the maximum limit of 3"),
+        (["post.profile.non_existent"], ValidationError, "Invalid include relation path"),
+        (["post.profile.user.extra"], ValidationError, "exceeds the maximum limit of 3"),
     ]
 )
 def test_search_include_depth_and_relation(
