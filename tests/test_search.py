@@ -42,6 +42,12 @@ class SearchComment(Base):
     body = Column(String)
     post = relationship("SearchPost")
 
+class CustomDepthEntity(Base):
+    __tablename__ = f"custom_depth_{uuid_pkg.uuid4().hex[:6]}"
+    __max_search_depth__ = 5
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+
 @pytest.fixture(autouse=True)
 def mock_restricted_fields() -> Generator[None, None, None]:
     from zcore.context.context import ctx
@@ -126,21 +132,136 @@ async def test_search_all_operators(
     assert len(items) == len(expected_ids)
     assert {item.id for item in items} == set(expected_ids)
 
-def make_nested_filter(depth: int) -> FilterItem:
+@pytest.mark.anyio
+async def test_search_startswith_operator(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_adm = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="adm")])
+    res_adm = await db_session.execute(engine.build_base_query(req_adm))
+    assert {u.id for u in res_adm.scalars().all()} == {1}
+
+    req_user = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="user")])
+    res_user = await db_session.execute(engine.build_base_query(req_user))
+    assert {u.id for u in res_user.scalars().all()} == {2}
+
+    req_none = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="nonexistent")])
+    res_none = await db_session.execute(engine.build_base_query(req_none))
+    assert len(res_none.scalars().all()) == 0
+
+@pytest.mark.anyio
+async def test_search_endswith_operator(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_percent = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="%")])
+    res_percent = await db_session.execute(engine.build_base_query(req_percent))
+    assert {u.id for u in res_percent.scalars().all()} == {1}
+
+    req_special = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="special")])
+    res_special = await db_session.execute(engine.build_base_query(req_special))
+    assert {u.id for u in res_special.scalars().all()} == {2}
+
+    req_st = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="st")])
+    res_st = await db_session.execute(engine.build_base_query(req_st))
+    assert {u.id for u in res_st.scalars().all()} == {3}
+
+@pytest.mark.anyio
+async def test_search_contains_operator(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_min = SearchRequest(filters=[FilterItem(field="username", op="contains", value="min")])
+    res_min = await db_session.execute(engine.build_base_query(req_min))
+    assert {u.id for u in res_min.scalars().all()} == {1}
+
+    req_spec = SearchRequest(filters=[FilterItem(field="username", op="contains", value="_spec")])
+    res_spec = await db_session.execute(engine.build_base_query(req_spec))
+    assert {u.id for u in res_spec.scalars().all()} == {2}
+
+    req_ues = SearchRequest(filters=[FilterItem(field="username", op="contains", value="ues")])
+    res_ues = await db_session.execute(engine.build_base_query(req_ues))
+    assert {u.id for u in res_ues.scalars().all()} == {3}
+
+@pytest.mark.anyio
+async def test_search_between_operator_numbers(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_1_2 = SearchRequest(filters=[FilterItem(field="id", op="between", value=[1, 2])])
+    res_1_2 = await db_session.execute(engine.build_base_query(req_1_2))
+    assert {u.id for u in res_1_2.scalars().all()} == {1, 2}
+
+    req_2_3 = SearchRequest(filters=[FilterItem(field="id", op="between", value=[2, 3])])
+    res_2_3 = await db_session.execute(engine.build_base_query(req_2_3))
+    assert {u.id for u in res_2_3.scalars().all()} == {2, 3}
+
+@pytest.mark.anyio
+async def test_search_between_operator_datetime(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_dt = SearchRequest(
+        filters=[
+            FilterItem(
+                field="created_at",
+                op="between",
+                value=["2026-01-01T00:00:00", "2026-01-02T23:59:59"]
+            )
+        ]
+    )
+    res_dt = await db_session.execute(engine.build_base_query(req_dt))
+    assert {u.id for u in res_dt.scalars().all()} == {1, 2}
+
+@pytest.mark.parametrize(
+    "invalid_val",
+    [
+        "not_a_list",
+        [1],
+        [1, 2, 3],
+        None,
+    ]
+)
+def test_search_between_validation_error(invalid_val: Any) -> None:
+    engine = SearchEngine(SearchUser)
+    req = SearchRequest(filters=[FilterItem(field="id", op="between", value=invalid_val)])
+    with pytest.raises(ValidationError) as exc_info:
+        engine.build_base_query(req)
+    assert "expects a list of 2 elements" in str(exc_info.value)
+
+def make_nested_filter(depth: int, field_name: str = "username") -> FilterItem:
     if depth <= 1:
-        return FilterItem(field="username", op="eq", value="guest")
-    return FilterItem(op="and", items=[make_nested_filter(depth - 1)])
+        return FilterItem(field=field_name, op="eq", value="guest")
+    return FilterItem(op="and", items=[make_nested_filter(depth - 1, field_name)])
 
 @pytest.mark.parametrize(
     "depth, should_raise",
     [
+        (1, False),
         (2, False),
+        (3, False),
         (4, True),
     ]
 )
-def test_search_max_filter_depth(depth: int, should_raise: bool) -> None:
+def test_search_max_filter_depth_default(depth: int, should_raise: bool) -> None:
     engine = SearchEngine(SearchUser)
     nested_filter = make_nested_filter(depth)
+    request = SearchRequest(filters=[nested_filter], size=10)
+    if should_raise:
+        with pytest.raises(ValidationError) as exc_info:
+            engine.build_base_query(request)
+        assert "Search query filter structure is too complex" in str(exc_info.value)
+    else:
+        query = engine.build_base_query(request)
+        assert query is not None
+
+@pytest.mark.parametrize(
+    "depth, should_raise",
+    [
+        (3, False),
+        (4, False),
+        (5, False),
+        (6, True),
+    ]
+)
+def test_search_custom_model_max_depth(depth: int, should_raise: bool) -> None:
+    engine = SearchEngine(CustomDepthEntity)
+    nested_filter = make_nested_filter(depth, field_name="username")
     request = SearchRequest(filters=[nested_filter], size=10)
     if should_raise:
         with pytest.raises(ValidationError) as exc_info:

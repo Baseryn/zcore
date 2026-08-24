@@ -43,7 +43,7 @@ class FilterItem(BaseModel):
     field: str | None = None
     op: Literal[
         "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null",
-        "contains", "startwith", "endwith", "between", "or", "and"
+        "contains", "startswith", "endswith", "between", "or", "and"
     ]
     value: Any | None = None
     items: list[FilterItem] | None = None
@@ -419,11 +419,11 @@ class SearchEngine:
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"%{escaped_value}%", escape="\\")
 
-        if op == "startwith":
+        if op == "startswith":
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"{escaped_value}%", escape="\\")
         
-        if op == "endwith":
+        if op == "endswith":
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"%{escaped_value}", escape="\\")
         
