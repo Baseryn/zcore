@@ -275,7 +275,7 @@ Contributions are welcome! Please read our guidelines before submitting a PR.
 
 - **Issues:** Bug reports and feature requests via [GitHub Issues](https://github.com/Baseryn/zcore/issues)
 - **PRs:** Open a pull request with a clear description of the change
-- **Local Setup:** `pip install -e ".[all]"` and run `hatch test` to verify
+- **Local Setup:** `pip install -e ".[all,dev]"` and run `hatch test` to verify
 
 ---
 
