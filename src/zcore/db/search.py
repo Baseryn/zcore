@@ -42,7 +42,8 @@ class FilterItem(BaseModel):
 
     field: str | None = None
     op: Literal[
-        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null", "or", "and"
+        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null",
+        "contains", "startwith", "endwith", "between", "or", "and"
     ]
     value: Any | None = None
     items: list[FilterItem] | None = None
@@ -421,6 +422,27 @@ class SearchEngine:
         if op == "ilike":
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"%{escaped_value}%", escape="\\")
+
+        if op == "startwith":
+            escaped_value = self._escape_like_wildcards(value)
+            return col.ilike(f"{escaped_value}%", escape="\\")
+        
+        if op == "endwith":
+            escaped_value = self._escape_like_wildcards(value)
+            return col.ilike(f"%{escaped_value}", escape="\\")
+        
+        if op == "contains":
+            if hasattr(col.type, "python_type") and col.type.python_type is str:
+                escaped_value = self._escape_like_wildcards(value)
+                return col.ilike(f"%{escaped_value}%", escape="\\")
+            return col.contains(value)
+
+        if op == "between":
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ValidationError(message=f"Operator 'between' expects a list of 2 elements, got {value}")
+            lower = self._coerce_value(col, value[0])
+            upper = self._coerce_value(col, value[1])
+            return col.between(lower, upper)
 
         coerced_value = self._coerce_value(col, value)
 
