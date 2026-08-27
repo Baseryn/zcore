@@ -1,12 +1,15 @@
 import asyncio
-import uuid
 import json
-from typing import Any, AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from zcore.web.streams import StreamManager, init_stream_redis
 import zcore.web.streams as streams_module
+from zcore.web.streams import StreamManager, init_stream_redis
+
 
 @pytest.fixture(autouse=True)
 def bypass_redis_pubsub(monkeypatch: pytest.MonkeyPatch) -> None:

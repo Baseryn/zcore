@@ -1,18 +1,22 @@
 import asyncio
+import contextlib
 import os
 import shutil
-from typing import AsyncGenerator, Any, Generator
+from collections.abc import AsyncGenerator, Generator
+from typing import Any
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from zcore.db.setup import Base, db_manager, get_db
-from zcore.kernel.di import container, _current_scope_id
-from zcore.kernel.engine import Kernel
 from zcore.cache.base import close_cache
 from zcore.config import Settings, initialize_settings
+from zcore.db.setup import Base, db_manager, get_db
+from zcore.kernel.di import _current_scope_id, container
+from zcore.kernel.engine import Kernel
+
 
 class MockSessionContext:
     def __init__(self, session: AsyncSession) -> None:
@@ -148,10 +152,8 @@ async def cleanup_background_tasks() -> AsyncGenerator[None, None]:
         task_name = str(task)
         if "start_eviction_loop" in task_name or "listen_to_redis" in task_name:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
 @pytest_asyncio.fixture
 async def test_app(db_session: AsyncSession) -> AsyncGenerator[FastAPI, None]:

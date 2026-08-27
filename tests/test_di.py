@@ -1,26 +1,28 @@
 import asyncio
 import uuid
-import pytest
-
-from contextlib import contextmanager
-from typing import Any, Generator, Type, get_origin, get_args, Annotated
 from abc import ABC
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Annotated, Any, get_args, get_origin
+
+import pytest
 from fastapi.params import Depends as DependsClass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.context.context import _request_context_store
 from zcore.db.setup import db_manager
 from zcore.kernel.di import (
-    container,
-    _current_scope_id,
-    _scoped_instances,
     CircularDependencyError,
     DIException,
-    Injector,
     Inject,
+    Injector,
+    _current_scope_id,
+    _scoped_instances,
     background_scope,
     background_task,
+    container,
 )
+
 
 class IService:
     pass
@@ -120,7 +122,7 @@ def reset_container() -> None:
         (ForwardB, ForwardB),
     ]
 )
-def test_resolve_singleton(interface: Type[Any], implementation: Type[Any]) -> None:
+def test_resolve_singleton(interface: type[Any], implementation: type[Any]) -> None:
     instance = implementation()
     container.register_singleton(interface, instance)
     
@@ -139,8 +141,8 @@ def test_resolve_singleton(interface: Type[Any], implementation: Type[Any]) -> N
     ]
 )
 def test_resolve_scoped(
-    interface: Type[Any],
-    implementation: Type[Any],
+    interface: type[Any],
+    implementation: type[Any],
     scope_1: str,
     scope_2: str
 ) -> None:
@@ -162,7 +164,7 @@ def test_resolve_scoped(
         (ForwardB, ForwardB),
     ]
 )
-def test_resolve_transient(interface: Type[Any], implementation: Type[Any]) -> None:
+def test_resolve_transient(interface: type[Any], implementation: type[Any]) -> None:
     container.register_transient(interface, implementation)
     
     res1 = container.resolve(interface)
@@ -178,7 +180,7 @@ def test_resolve_transient(interface: Type[Any], implementation: Type[Any]) -> N
         {"A": CircA, "B": CircB},
     ]
 )
-def test_circular_dependency(registrations: dict[str, Type[Any]]) -> None:
+def test_circular_dependency(registrations: dict[str, type[Any]]) -> None:
     container.register_transient(CircA, registrations["A"])
     container.register_transient(CircB, registrations["B"])
     
@@ -195,7 +197,7 @@ def test_circular_dependency(registrations: dict[str, Type[Any]]) -> None:
         (ForwardA, ForwardB),
     ]
 )
-def test_forward_reference_resolution(target: Type[Any], dep: Type[Any]) -> None:
+def test_forward_reference_resolution(target: type[Any], dep: type[Any]) -> None:
     container.register_transient(dep, dep)
     container.register_transient(target, target)
     
@@ -220,7 +222,7 @@ async def test_di_concurrency_isolation(num_tasks: int) -> None:
     results = await asyncio.gather(*tasks)
     
     seen_ids = set()
-    for task_id, instance in results:
+    for _task_id, instance in results:
         assert instance.id not in seen_ids
         seen_ids.add(instance.id)
     assert len(seen_ids) == num_tasks

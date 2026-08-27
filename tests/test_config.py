@@ -1,11 +1,12 @@
 import os
 import sys
 import tempfile
-from typing import Any
+
 import pytest
 
 from zcore.config import Settings, get_settings, initialize_settings, settings
 from zcore.kernel.di import container
+
 
 @pytest.mark.parametrize(
     "env_key, env_val, expected_val, check_attr",
@@ -38,11 +39,11 @@ def test_settings_proxy_resolution(secret_a: str, secret_b: str) -> None:
 
     settings_a = Settings(SECRET_KEY=secret_a)
     initialize_settings(settings_a)
-    assert settings.SECRET_KEY == secret_a
+    assert secret_a == settings.SECRET_KEY
 
     settings_b = Settings(SECRET_KEY=secret_b)
     initialize_settings(settings_b)
-    assert settings.SECRET_KEY == secret_b
+    assert secret_b == settings.SECRET_KEY
 
 def test_settings_type_coercion(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEBUG", "False")
@@ -99,7 +100,7 @@ def test_settings_subclass_di_registration() -> None:
     resolved_child = container.resolve(CustomProjectSettings)
     assert resolved_parent is custom_inst
     assert resolved_child is custom_inst
-    assert getattr(resolved_parent, "CUSTOM_FIELD") == "custom_value"
+    assert resolved_parent.CUSTOM_FIELD == "custom_value"
 
 def test_settings_get_settings_fallback() -> None:
     container._singletons.clear()

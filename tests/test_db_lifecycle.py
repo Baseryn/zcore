@@ -1,12 +1,14 @@
 import uuid
-import pytest
-
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Type
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from zcore.db.setup import DatabaseManager
 from zcore.db.uow import UnitOfWork
+
 
 @pytest.mark.parametrize(
     "db_url, pool_size, max_overflow",
@@ -39,7 +41,7 @@ async def test_db_manager_init(db_url: str, pool_size: int, max_overflow: int) -
     ]
 )
 @pytest.mark.anyio
-async def test_db_session_rollback_on_error(exception_class: Type[Exception]) -> None:
+async def test_db_session_rollback_on_error(exception_class: type[Exception]) -> None:
     manager = DatabaseManager()
     mock_session = AsyncMock()
     
@@ -106,7 +108,7 @@ async def test_uow_commit_emits_events(events_to_register: list[tuple[str, dict[
 )
 @pytest.mark.anyio
 async def test_uow_rollback_clears_events(
-    exception_class: Type[Exception],
+    exception_class: type[Exception],
     events_to_register: list[tuple[str, dict[str, Any]]]
 ) -> None:
     session = AsyncMock()
@@ -136,7 +138,7 @@ async def test_uow_rollback_clears_events(
 async def test_db_manager_uninitialized_access() -> None:
     manager = DatabaseManager()
     with pytest.raises(RuntimeError):
-        async with manager.session() as session:
+        async with manager.session():
             pass
 
 @pytest.mark.anyio
@@ -187,7 +189,7 @@ async def test_db_manager_session_propagates_exception() -> None:
     manager._session_factory = mock_session_ctx
 
     with pytest.raises(ValueError, match="Internal Error"):
-        async with manager.session() as session:
+        async with manager.session():
             raise ValueError("Internal Error")
             
     mock_session.rollback.assert_called_once()

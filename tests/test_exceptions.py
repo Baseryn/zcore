@@ -1,10 +1,10 @@
 import uuid
-import pytest
-
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Type
+from typing import Any
 from unittest.mock import patch
+
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -18,6 +18,7 @@ from zcore.exceptions.base import (
 )
 from zcore.exceptions.handlers import app_exception_handler
 from zcore.web.response import ResponseWrapper
+
 
 class CustomPaymentFailed(AppException):
     status_code = 402
@@ -34,7 +35,7 @@ class CustomPaymentFailed(AppException):
     ]
 )
 def test_exception_status_codes(
-    exc_class: Type[AppException],
+    exc_class: type[AppException],
     status_code: int,
     message: str,
     payload: dict[str, Any] | None

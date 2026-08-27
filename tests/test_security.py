@@ -1,19 +1,20 @@
-import uuid
 import time
-import pytest
-
-from typing import Any, Type
+import uuid
 from datetime import timedelta
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel
-from unittest.mock import MagicMock, AsyncMock, patch
 
 from zcore.config import settings
 from zcore.context import ctx
 from zcore.exceptions import AuthError, ForbiddenError
 from zcore.security import BaseAuth, HasScopes, Security
 
+
 class MockUser:
-    def __init__(self, user_id: uuid.UUID, is_active: bool, is_superuser: bool, scopes: Any, all_restricted_fields: list[str] = None) -> None:
+    def __init__(self, user_id: uuid.UUID, is_active: bool, is_superuser: bool, scopes: Any, all_restricted_fields: list[str] | None = None) -> None:
         self.id = user_id
         self.is_active = is_active
         self.is_superuser = is_superuser
@@ -86,7 +87,7 @@ async def test_scope_permissions(
     user_superuser: bool,
     user_scopes: set[str],
     required_scopes: list[str],
-    expected_error: Type[Exception] | None
+    expected_error: type[Exception] | None
 ) -> None:
     permission = HasScopes(*required_scopes)
     mock_request = MagicMock()
@@ -234,6 +235,7 @@ def test_argoncustom_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
     
     try:
         from importlib import reload
+
         import zcore.security.security
         reload(zcore.security.security)
         
@@ -242,6 +244,7 @@ def test_argoncustom_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
     finally:
         container._singletons = original_singletons
         from importlib import reload
+
         import zcore.security.security
         reload(zcore.security.security)
 

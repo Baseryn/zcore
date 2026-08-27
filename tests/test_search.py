@@ -1,15 +1,17 @@
 import uuid as uuid_pkg
+from collections.abc import AsyncGenerator, Generator
+from datetime import datetime
+from typing import Any
+
 import pytest
 import pytest_asyncio
-from datetime import datetime
-
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, Boolean, Uuid
-from typing import Any, AsyncGenerator, Generator, Type
 
-from zcore.db.setup import Base
 from zcore.db.search import FilterItem, SearchEngine, SearchRequest, SortItem
+from zcore.db.setup import Base
 from zcore.exceptions.base import ForbiddenError, ValidationError
+
 
 class SearchUser(Base):
     __tablename__ = f"search_users_{uuid_pkg.uuid4().hex[:6]}"
@@ -302,7 +304,7 @@ def test_search_restricted_field_bypass(field_variant: str) -> None:
 )
 def test_search_include_depth_and_relation(
     paths: list[str],
-    expected_error: Type[Exception] | None,
+    expected_error: type[Exception] | None,
     error_message: str
 ) -> None:
     engine = SearchEngine(SearchComment)

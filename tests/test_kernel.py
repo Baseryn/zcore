@@ -1,10 +1,12 @@
 import uuid
+
 import pytest
 from fastapi import FastAPI
 
+from zcore.kernel.di import container
 from zcore.kernel.engine import Kernel
 from zcore.kernel.events import EventDispatcher
-from zcore.kernel.di import container
+
 
 class TrackedPlugin:
     def __init__(

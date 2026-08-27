@@ -1,12 +1,14 @@
 import datetime
-from decimal import Decimal
 import uuid
+from decimal import Decimal
 from typing import Any
+
 import pytest
 
 from zcore.exceptions.base import ValidationError
 from zcore.utils.helpers import json_dumps, json_loads, slugify
 from zcore.utils.validators import validate_json_schema
+
 
 class DummyUser:
     def __init__(self, name: str) -> None:
