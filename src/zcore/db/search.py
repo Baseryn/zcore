@@ -42,7 +42,8 @@ class FilterItem(BaseModel):
 
     field: str | None = None
     op: Literal[
-        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null", "or", "and"
+        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null",
+        "contains", "startswith", "endswith", "between", "or", "and"
     ]
     value: Any | None = None
     items: list[FilterItem] | None = None
@@ -104,6 +105,7 @@ class SearchEngine:
         self.model = model
         self.mapper = inspect(model)
         self.custom_handlers: dict[str, Callable[[Any], Any]] = {}
+        self.max_depth: int = getattr(model, "__max_search_depth__", 3)
 
     def register_handler(
         self, field_name: str, handler: Callable[[Any], Any]
@@ -158,8 +160,8 @@ class SearchEngine:
         """
         restricted = set(ctx.restricted_fields)
         valid_columns = {col.key for col in self.mapper.columns}
+        max_depth = self.max_depth
 
-        MAX_INCLUDE_DEPTH = 3
         if search_in.include:
             for path in search_in.include:
                 if self._is_path_restricted(path, restricted):
@@ -168,9 +170,9 @@ class SearchEngine:
                     )
 
                 parts = path.split(".")
-                if len(parts) > MAX_INCLUDE_DEPTH + 1:
+                if len(parts) > max_depth:
                     raise ValidationError(
-                        message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}."
+                        message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {max_depth}."
                     )
 
                 accumulated_path: list[str] = []
@@ -190,11 +192,6 @@ class SearchEngine:
                             message=f"Invalid include relation path: '{path}'"
                         )
                     current_model = rel.mapper.class_
-
-                if len(parts) > MAX_INCLUDE_DEPTH:
-                    raise ValidationError(
-                        message=f"Relation inclusion depth of '{path}' exceeds the maximum limit of {MAX_INCLUDE_DEPTH}."
-                    )
 
         if search_in.sort:
             for s in search_in.sort:
@@ -421,6 +418,27 @@ class SearchEngine:
         if op == "ilike":
             escaped_value = self._escape_like_wildcards(value)
             return col.ilike(f"%{escaped_value}%", escape="\\")
+
+        if op == "startswith":
+            escaped_value = self._escape_like_wildcards(value)
+            return col.ilike(f"{escaped_value}%", escape="\\")
+        
+        if op == "endswith":
+            escaped_value = self._escape_like_wildcards(value)
+            return col.ilike(f"%{escaped_value}", escape="\\")
+        
+        if op == "contains":
+            if hasattr(col.type, "python_type") and col.type.python_type is str:
+                escaped_value = self._escape_like_wildcards(value)
+                return col.ilike(f"%{escaped_value}%", escape="\\")
+            return col.contains(value)
+
+        if op == "between":
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ValidationError(message=f"Operator 'between' expects a list of 2 elements, got {value}")
+            lower = self._coerce_value(col, value[0])
+            upper = self._coerce_value(col, value[1])
+            return col.between(lower, upper)
 
         coerced_value = self._coerce_value(col, value)
 
