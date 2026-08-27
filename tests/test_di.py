@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from typing import Any, Generator, Type, get_origin, get_args, Annotated
 from abc import ABC
 from fastapi.params import Depends as DependsClass
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from zcore.context.context import _request_context_store
+from zcore.db.setup import db_manager
 from zcore.kernel.di import (
     container,
     _current_scope_id,
@@ -15,6 +18,8 @@ from zcore.kernel.di import (
     DIException,
     Injector,
     Inject,
+    background_scope,
+    background_task,
 )
 
 class IService:
@@ -81,6 +86,14 @@ class DeepB:
 class DeepC:
     def __init__(self, a: "DeepA") -> None:
         self.a = a
+
+class BackgroundTaskWorker:
+    def __init__(self) -> None:
+        self.id = uuid.uuid4()
+
+class SecondaryWorker:
+    def __init__(self) -> None:
+        self.id = uuid.uuid4()
 
 @contextmanager
 def di_scope(scope_id: str) -> Generator[None, None, None]:
@@ -301,3 +314,157 @@ def test_deep_circular_dependency() -> None:
     assert "DeepA" in str(exc_info.value)
     assert "DeepB" in str(exc_info.value)
     assert "DeepC" in str(exc_info.value)
+
+@pytest.mark.anyio
+async def test_background_scope_lifecycle_and_isolation() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+    
+    parent_ctx_token = _request_context_store.set({"user_id": "parent-user", "role": "admin"})
+    
+    try:
+        assert _current_scope_id.get() is None
+        
+        async with background_scope(inherit_context=True, custom_flag=True):
+            assert _current_scope_id.get() is not None
+            session = container.resolve(AsyncSession)
+            assert isinstance(session, AsyncSession)
+            
+            current_store = _request_context_store.get()
+            assert current_store.get("user_id") == "parent-user"
+            assert current_store.get("custom_flag") is True
+            
+        assert _current_scope_id.get() is None
+        assert _request_context_store.get().get("custom_flag") is None
+        assert _request_context_store.get().get("user_id") == "parent-user"
+    finally:
+        _request_context_store.reset(parent_ctx_token)
+
+@pytest.mark.anyio
+async def test_background_scope_no_inherit_context() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+
+    parent_ctx_token = _request_context_store.set({"user_id": "isolated-user", "tenant": "corp"})
+    
+    try:
+        async with background_scope(inherit_context=False, task_only_key="task-value"):
+            current_store = _request_context_store.get()
+            assert current_store.get("user_id") is None
+            assert current_store.get("tenant") is None
+            assert current_store.get("task_only_key") == "task-value"
+            
+        assert _request_context_store.get().get("user_id") == "isolated-user"
+        assert _request_context_store.get().get("tenant") == "corp"
+    finally:
+        _request_context_store.reset(parent_ctx_token)
+
+@pytest.mark.anyio
+async def test_background_scope_exception_cleanup_guarantee() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+
+    token = _request_context_store.set({"initial": "state"})
+    
+    try:
+        with pytest.raises(ValueError, match="Scope breakdown"):
+            async with background_scope(inherit_context=True, err_state=True):
+                assert _current_scope_id.get() is not None
+                raise ValueError("Scope breakdown")
+                
+        assert _current_scope_id.get() is None
+        assert _request_context_store.get() == {"initial": "state"}
+    finally:
+        _request_context_store.reset(token)
+
+@pytest.mark.anyio
+async def test_background_task_decorator_async_execution() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+        
+    container.register_scoped(BackgroundTaskWorker, BackgroundTaskWorker)
+    
+    @background_task
+    async def sample_async_job(target_name: str, worker: BackgroundTaskWorker) -> dict[str, Any]:
+        session = container.resolve(AsyncSession)
+        assert isinstance(session, AsyncSession)
+        return {"name": target_name, "worker_id": worker.id}
+        
+    result = await sample_async_job("task-alpha")
+    assert result["name"] == "task-alpha"
+    assert isinstance(result["worker_id"], uuid.UUID)
+
+@pytest.mark.anyio
+async def test_background_task_decorator_sync_execution() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+        
+    container.register_scoped(BackgroundTaskWorker, BackgroundTaskWorker)
+    
+    @background_task
+    def sample_sync_job(value: int, worker: BackgroundTaskWorker) -> int:
+        session = container.resolve(AsyncSession)
+        assert isinstance(session, AsyncSession)
+        assert isinstance(worker.id, uuid.UUID)
+        return value * 2
+        
+    computed = await sample_sync_job(21)
+    assert computed == 42
+
+@pytest.mark.anyio
+async def test_background_task_explicit_override_arguments() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+
+    container.register_scoped(BackgroundTaskWorker, BackgroundTaskWorker)
+    explicit_worker = BackgroundTaskWorker()
+
+    @background_task
+    async def override_job(worker: BackgroundTaskWorker) -> uuid.UUID:
+        return worker.id
+
+    result_id = await override_job(worker=explicit_worker)
+    assert result_id == explicit_worker.id
+
+@pytest.mark.anyio
+async def test_background_task_multiple_injections() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+
+    container.register_scoped(BackgroundTaskWorker, BackgroundTaskWorker)
+    container.register_scoped(SecondaryWorker, SecondaryWorker)
+
+    @background_task
+    async def multi_dep_job(
+        w1: BackgroundTaskWorker,
+        w2: SecondaryWorker,
+        tag: str = "default_tag"
+    ) -> tuple[uuid.UUID, uuid.UUID, str]:
+        return w1.id, w2.id, tag
+
+    id1, id2, tag = await multi_dep_job()
+    assert isinstance(id1, uuid.UUID)
+    assert isinstance(id2, uuid.UUID)
+    assert tag == "default_tag"
+
+@pytest.mark.anyio
+async def test_background_task_concurrent_isolation() -> None:
+    if not db_manager._engine:
+        db_manager.init_app("sqlite+aiosqlite:///:memory:")
+
+    container.register_scoped(BackgroundTaskWorker, BackgroundTaskWorker)
+
+    @background_task
+    async def concurrent_job(idx: int, worker: BackgroundTaskWorker) -> tuple[int, uuid.UUID, int]:
+        session = container.resolve(AsyncSession)
+        await asyncio.sleep(0.005)
+        return idx, worker.id, id(session)
+
+    tasks = [concurrent_job(i) for i in range(10)]
+    results = await asyncio.gather(*tasks)
+
+    worker_ids = {r[1] for r in results}
+    session_memory_ids = {r[2] for r in results}
+
+    assert len(worker_ids) == 10
+    assert len(session_memory_ids) == 10
