@@ -38,7 +38,7 @@ While FastAPI provides a high-performance engine for HTTP, it leaves the archite
 - **⚡ Scoped Dependency Injection** — High-performance constructor auto-wiring for Singleton, Transient, and request-scoped dependencies.
 - **🏗️ Modular Plugin Architecture** — Organize business domains into decoupled plugins with topological dependency ordering.
 - **🔍 Secure Dynamic Search Engine** — Nested JSON filters, eager loading, cursor/offset pagination, and column-level access controls.
-- **📦 Zero-Boilerplate CLI** — From `pip install` to running secure CRUD endpoints in under two minutes.
+- **📦 Interactive TUI & Scaffolding Engine** — Context-aware terminal dashboard, lightning-fast `uv` virtualenv orchestration, and granular layer-by-layer domain generators.
 
 ---
 
@@ -46,13 +46,13 @@ While FastAPI provides a high-performance engine for HTTP, it leaves the archite
 
 | Concern | Raw FastAPI | With ZCore |
 |---------|-------------|------------|
-| **Endpoint Scaffolding** | Manually write 7+ routes and handlers per model | One `BaseRouter` class $\rightarrow$ 7 secure endpoints out-of-the-box |
+| **Endpoint Scaffolding** | Manually write 7+ routes and handlers per model | One `BaseRouter` class → 7 secure endpoints out-of-the-box |
 | **Data Leakage** | Multiple Pydantic models per role; manual conditionals | `Zchema` auto-prunes restricted fields per active context |
 | **Database Transactions** | Scattered `commit()` / `rollback()` calls | `UnitOfWork` guarantees atomicity + post-commit domain events |
 | **Dependency Wiring** | Deeply nested, verbose `Depends()` parameter chains | Clean constructor auto-wiring via IoC container + `Inject[T]` |
 | **Search & Pagination** | Hand-crafted SQL parsing per endpoint | Declarative JSON filters + keyset cursor and offset pagination |
-| **Project Layout** | No standard; every team reinvents the wheel | `zc init` + `zc startapp` — decoupled domain modularity |
-| **Startup Orchestration** | Fragile `@app.on_event` chains | `Plugin` protocol with dependency DAG $\rightarrow$ topological sorting |
+| **Project Tooling & Layout** | Manual folder creation, fragmented glue scripts | `zc` interactive TUI with auto `uv` setup & granular layer picking |
+| **Startup Orchestration** | Fragile `@app.on_event` chains | `Plugin` protocol with dependency DAG → topological sorting |
 
 ---
 
@@ -66,9 +66,16 @@ pip install fastapi-zcore-framework[all]
 
 ### 2. Scaffold
 
+Launch the interactive wizard or run directly:
+
 ```bash
+# Interactive mode (prompts for DB driver, uv/.venv installation, etc.)
 zc init my_app && cd my_app
-zc startapp tasks --template
+zc startapp tasks
+
+# Or instant non-interactive scaffolding with defaults
+zc init my_app -y && cd my_app
+zc startapp tasks -y
 ```
 
 ### 3. Define
@@ -94,7 +101,7 @@ class Task(Base):
 zc run
 ```
 
-Your API is live at **`http://127.0.0.1:8000`** with 6 CRUD endpoints and dynamic search ready.
+Your API is live at **`http://127.0.0.1:8000`** with 7 secure endpoints (CRUD + Dynamic Search) ready.
 
 > 📖 **Full walkthrough:** [Quick Start Guide](https://baseryn.github.io/zcore-docs/docs/quick-start)
 
@@ -209,19 +216,42 @@ A dynamic query builder that translates nested JSON filters into safe SQLAlchemy
 </details>
 
 <details>
-<summary><strong>📦 CLI Scaffolding</strong></summary>
+<summary><strong>📦 Interactive TUI & Scaffolding Engine</strong></summary>
 <br>
 
-Stop writing boilerplate. The `zc` CLI generates consistent, production-ready domain modules and environment templates with a single command.
+The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered by Questionary and Rich. It features:
 
-| Command | Purpose |
-|---------|---------|
-| `zc init <name>` | Create a new project with settings, `.env`, and `main.py` |
-| `zc startapp <name>` | Scaffold an empty domain module |
-| `zc startapp <name> --template` | Scaffold with full Model, Schema, Repo, Service, Router, and Plugin boilerplate |
-| `zc run` | Launch Uvicorn with auto-reload and environment-aware config |
-| `zc gensecret` | Generate a 64-character cryptographically secure secret key |
-| `zc genenv` | Introspect registered `Settings` classes and scaffold `.env.example` |
+* **Workspace & Context Awareness:** Detects whether you are inside an active project, in a root workspace containing multiple services, or starting fresh.
+* **Automated `uv` / `.venv` Setup:** Initializes isolated virtual environments and installs dependencies automatically using `uv` (recommended) or standard `pip`.
+* **Multi-Engine Driver Bootstrapping:** Configures SQLite (`aiosqlite`), PostgreSQL (`asyncpg`), or MySQL (`aiomysql`) in `.env` and `requirements.txt` out-of-the-box.
+* **Granular Architectural Scaffolding:** Generates modular domain apps in 3 modes (*Full Boilerplate*, *Clean/Blank*, or *Custom Layer Selection* across Models, Schemas, Repositories, Services, Routers, Plugins, and Pytest suites).
+
+```text
+$ zc
+
+⚡ ZCore Framework v0.1.0-Beta • Modern Modular Monolith
+ FastAPI • SQLAlchemy 2.0 • Pydantic V2
+
+? What framework task would you like to perform? 📦 init — Scaffold a new full ZCore project
+┌  Initialize New ZCore Project
+│
+? Project directory name: core_api
+? Select primary database driver: PostgreSQL (asyncpg) — Production Ready
+? Initialize virtual environment (.venv) and install dependencies? Yes (uv)
+│  ✓ Environment & dependencies installed successfully.
+└  Project 'core_api' ready!
+```
+
+#### CLI Command Reference
+
+| Command | Interactive | Non-Interactive Flags | Purpose |
+|---------|:-----------:|-----------------------|---------|
+| `zc` | ✅ | — | Launch interactive orchestration dashboard |
+| `zc init [name]` | ✅ | `--db [sqlite\|postgres\|mysql]`, `-y` | Bootstrap a new project with settings, `.env`, and dependencies |
+| `zc startapp [name]` | ✅ | `--template / --no-template`, `--test / --no-test`, `-y` | Scaffold domain modules with granular layer selection |
+| `zc run` | ✅ | — | Launch local Uvicorn dev server with auto-reload |
+| `zc gensecret` | — | — | Generate a 64-character cryptographically secure `SECRET_KEY` |
+| `zc genenv` | ✅ | `-o <output>`, `-f / --force` | Introspect active `Settings` classes and scaffold `.env.example` |
 </details>
 
 ---
@@ -245,7 +275,7 @@ Contributions are welcome! Please read our guidelines before submitting a PR.
 
 - **Issues:** Bug reports and feature requests via [GitHub Issues](https://github.com/Baseryn/zcore/issues)
 - **PRs:** Open a pull request with a clear description of the change
-- **Local Setup:** `pip install -e ".[all]"` and run `hatch test` to verify
+- **Local Setup:** `pip install -e ".[all,dev]"` and run `hatch test` to verify
 
 ---
 
@@ -257,5 +287,5 @@ See [LICENSE](https://github.com/Baseryn/zcore/blob/master/LICENSE) for details.
 ---
 
 <p align="center">
-  <sub>Built with ☕ and architectural rigor by <a href="https://github.com/alialfostovar">Ali Alf Ostovar</a>.</sub>
+  <sub>Built with ☕ and architectural rigor by <a href="https://github.com/alialfostovar">Ali Alf Ostovar</a> / <a href="https://github.com/Baseryn">Baseryn</a>.</sub>
 </p>
