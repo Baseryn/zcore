@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select, func, inspect, select
+from sqlalchemy import Select, delete, func, insert, inspect, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.interfaces import ExecutableOption
@@ -258,13 +258,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not schemas:
             return []
 
-        records = [self.model(**schema.model_dump()) for schema in schemas]
-        self.db.add_all(records)
+        payloads = [schema.model_dump() for schema in schemas]
+        stmt = insert(self.model).values(payloads).returning(self.model)
+        result = await self.db.execute(stmt)
         await self.db.flush()
-        if refresh:
-            for record in records:
-                await self.db.refresh(record)
-        return records
+        return list(result.scalars().all())
 
     async def update(
         self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
@@ -295,35 +293,38 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     async def update_multi(
         self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
     ) -> Sequence[ModelType]:
-        """Batch update multiple database records mapped by their primary keys.
+        """Bulk update multiple database records using DBAPI executemany.
+
+        Executes the updates without hydrating ORM entities beforehand, then fetches
+        and returns the updated model instances in a single batch query.
 
         Args:
-            data: A dictionary mapping target primary keys to their respective update schemas.
-            partial: If True, fields omitted in the schema payload are skipped. Defaults to False.
-            refresh: If True, refreshes the instance attributes from the database after flushing.
-                Defaults to False.
+            data: A mapping of primary keys to their update schemas.
 
         Returns:
             A sequence containing the updated database model instances.
+
+        Raises:
+            sqlalchemy.orm.exc.StaleDataError: If any target primary key does not exist.
         """
         if not data:
             return []
 
-        records = await self.get_by_ids(ids=list(data.keys()))
-        record_map = {getattr(r, self.pk_name): r for r in records}
-        updated_records = []
-        for record_id, schema in data.items():
-            record = record_map.get(record_id)
-            if record:
-                update_data = schema.model_dump(exclude_unset=partial)
-                for field, value in update_data.items():
-                    setattr(record, field, value)
-                updated_records.append(record)
+        payloads = [
+            {
+                **schema.model_dump(exclude_unset=partial),
+                self.pk_name: pk_val,
+            }
+            for pk_val, schema in data.items()
+        ]
+
+        await self.db.execute(
+            update(self.model),
+            payloads,
+        )
         await self.db.flush()
-        if refresh:
-            for record in updated_records:
-                await self.db.refresh(record)
-        return updated_records
+
+        return await self.get_by_ids(ids=list(data.keys()))
 
     async def delete(self, id: Any) -> ModelType | None:
         """Delete a single record by its primary key identifier.
@@ -353,11 +354,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        records = await self.get_by_ids(ids=ids)
-        for record in records:
-            await self.db.delete(record)
+        stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+        result = await self.db.scalars(stmt)
         await self.db.flush()
-        return records
+        return list(result.all())
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):

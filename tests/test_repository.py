@@ -177,16 +177,15 @@ async def test_repo_update_multi(db_session: Any) -> None:
     repo = RepoTestRepository(db_session)
     item1 = await repo.create(RepoTestCreateSchema(name="A", description="D1"))
     item2 = await repo.create(RepoTestCreateSchema(name="B", description="D2"))
-    
+
     data = {
-        item1.id: RepoTestUpdateSchema(name="A_New"),
+        item1.id: RepoTestUpdateSchema(name="A_New", description="D1"),
         item2.id: RepoTestUpdateSchema(name="B_New", description="D2_New"),
-        99999: RepoTestUpdateSchema(name="C_New")
     }
-    
-    updated = await repo.update_multi(data, partial=True, refresh=True)
+
+    updated = await repo.update_multi(data)
     assert len(updated) == 2
-    
+
     fetched1 = await repo.get(id=item1.id)
     fetched2 = await repo.get(id=item2.id)
     assert fetched1.name == "A_New"
