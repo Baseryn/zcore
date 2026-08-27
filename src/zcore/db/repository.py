@@ -95,6 +95,9 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
             True if matching records are found, False otherwise.
         """
         query = select(self.pk)
+        scoper = getattr(self.model, "scope_query", None)
+        if scoper:
+            query = scoper(query)
         query = self._apply_filters(query, *criterion, **filters).limit(1)
         result = await self.db.execute(query)
         return result.first() is not None
