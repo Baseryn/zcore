@@ -49,15 +49,27 @@ async def root():
     }
 """
 
-ENV_TEMPLATE = """PYTHONPATH=.
-DEBUG=True
+ENV_TEMPLATE = """# --- Local Runner / Infrastructure ---
+PYTHONPATH=.
+HOST=127.0.0.1
+PORT=8000
+
+# --- ZCore Application Settings ---
 PROJECT_NAME="{project_name}"
+DEBUG=True
+
 DATABASE_URL=sqlite+aiosqlite:///zcore_dev.db
+DATABASE_TEST_URL=sqlite+aiosqlite:///zcore_test.db
+POOL_SIZE=5
+MAX_OVERFLOW=10
+
 SECRET_KEY="{secret_key}"
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-PORT=8000
-HOST=127.0.0.1
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+STORAGE_PATH=./storage
+REDIS_URL=
 """
 
 REQUIREMENTS_TEMPLATE = """fastapi-zcore-framework[all]
