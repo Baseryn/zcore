@@ -248,3 +248,21 @@ def test_interactive_dashboard_cancel(run_in_tmp_path: Path) -> None:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
+
+
+def test_scaffolded_templates_are_valid_python(
+    run_in_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_name = "syntax_check_project"
+    with patch.object(sys, "argv", ["zc", "init", project_name, "-y"]):
+        main()
+
+    monkeypatch.chdir(run_in_tmp_path / project_name)
+    with patch.object(sys, "argv", ["zc", "startapp", "billing_domain", "-y"]):
+        main()
+
+    app_dir = run_in_tmp_path / project_name / "billing_domain"
+    for py_file in app_dir.glob("*.py"):
+        code = py_file.read_text(encoding="utf-8")
+        if code.strip():
+            compile(code, str(py_file), "exec")
