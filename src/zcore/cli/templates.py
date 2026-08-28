@@ -161,19 +161,17 @@ REPOSITORY_TEMPLATE = """from zcore import BaseRepository
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import {ModelName}
-from .schemas import {ModelName}Create, {ModelName}Update
 
-class {ModelName}Repository(BaseRepository[{ModelName}, {ModelName}Create, {ModelName}Update]):
+class {ModelName}Repository(BaseRepository[{ModelName}]):
     def __init__(self, db: AsyncSession):
         super().__init__(model={ModelName}, db=db)
 """
 
 SERVICE_TEMPLATE = """from zcore import BaseService
 from .models import {ModelName}
-from .schemas import {ModelName}Create, {ModelName}Update
 from .repositories import {ModelName}Repository
 
-class {ModelName}Service(BaseService[{ModelName}, {ModelName}Create, {ModelName}Update]):
+class {ModelName}Service(BaseService[{ModelName}]):
     def __init__(self, repository: {ModelName}Repository):
         super().__init__(model={ModelName}, repository=repository)
 """
