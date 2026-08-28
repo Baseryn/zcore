@@ -61,19 +61,30 @@ pip install -e ".[all,dev]"
 We aim for high test coverage on core architectural units. ZCore uses `pytest` and `pytest-asyncio` for asynchronous test suites.
 
 ### Test Architecture
-ZCore's codebase is highly modular. To ensure that components like the Kernel, Plugins, Dependency Injection (DI), Unit of Work (UOW), Router, and Middleware interact correctly, we organize our tests as follows:
+ZCore's tests are organized modularly across architectural domains:
 
 ```text
 tests/
-├── unit/                # Tests for isolated, single architectural units with mocks
-│   ├── test_repository.py
-│   └── test_zchema.py
-├── integration/         # Tests verifying interactions between modules
-│   ├── test_kernel_startup.py
-│   ├── test_plugin_loading.py
-│   └── test_request_scope.py
-└── e2e/                 # Full end-to-end request/response flows using TestClient
-    └── test_crud_flow.py
+├── test_cache.py
+├── test_cli.py
+├── test_context.py
+├── test_db_lifecycle.py
+├── test_di.py
+├── test_events.py
+├── test_exceptions.py
+├── test_kernel.py
+├── test_logging.py
+├── test_pagination.py
+├── test_repository.py
+├── test_search.py
+├── test_security.py
+├── test_service.py
+├── test_soft_delete.py
+├── test_storage.py
+├── test_streams.py
+├── test_testing_subsystem.py
+├── test_utils.py
+└── test_web.py
 ```
 
 ### Running Tests Locally
@@ -84,11 +95,11 @@ pytest
 
 If you prefer to run tests inside Hatch-isolated environments:
 ```bash
-hatch run test
+hatch test
 ```
 
 ### Writing Tests
-- **Asynchronous Tests:** Ensure your async tests are decorated with `@pytest.mark.asyncio`.
+- **Asynchronous Tests:** Ensure your async tests are decorated with `@pytest.mark.anyio` or `@pytest.mark.asyncio`.
 - **Isolation:** Tests should not leave behind lingering SQLite databases, active sessions, or running background threads.
 - **Mocks:** When writing tests that require external services like Redis, implement mock fallbacks where appropriate to ensure the test suite can run fully offline.
 
@@ -107,8 +118,8 @@ mypy src/
 ### 2. Linting & Formatting
 Ensure your code is clean, PEP-8 compliant, and structured consistently. We recommend using `ruff` for formatting and linting:
 ```bash
-ruff check src/
-ruff format src/
+ruff check .
+ruff format --check .
 ```
 
 ---
@@ -124,14 +135,17 @@ ZCore uses the **Conventional Commits** specification to automate our changelog 
 Common types include:
 - `feat`: A new feature (corresponds to a minor version bump).
 - `fix`: A bug fix (corresponds to a patch version bump).
+- `perf`: A code change that improves performance.
 - `docs`: Documentation updates.
+- `style`: Changes that do not affect the meaning of the code (white-space, formatting, etc.).
 - `refactor`: Code changes that neither fix a bug nor add a feature.
 - `test`: Adding or correcting tests.
+- `build`: Changes that affect the build system or external dependencies.
 - `ci`: Changes to our CI/CD workflows or scripts.
 
 *Examples:*
-- `feat(di): add redis plugin support`
-- `fix(uow): resolve transaction rollback issue on async commit`
+- `feat(di): add background_scope and background_task decorator`
+- `perf(db): optimize create_multi using insert returning clause`
 - `docs(zchema): update guide for dynamic schema pruning`
 
 ---
@@ -148,12 +162,12 @@ flowchart LR
     D --> E[Submit PR]
 ```
 
-1. **Branch Naming:** Use descriptive branch names (e.g., `feature/add-s3-provider` or `bugfix/fix-uow-flush`).
+1. **Branch Naming:** Use descriptive branch names (e.g., `feat/add-s3-provider` or `fix/uow-flush-isolation`).
 2. **Atomic Commits:** Keep your commits focused on single logical changes and adhere to the conventional commits schema.
 3. **Documentation:** If you are adding a new feature or modifying an existing protocol, you **must** update the corresponding documentation page under the `docs/` folder.
 
 ### 🛡️ CI/CD & Branch Protection
-Our repository has strict branch protection rules configured on `master` and `develop`.
+Our repository has strict branch protection rules configured on `main` and `develop`.
 - **Mandatory CI Checks:** Your Pull Request cannot be merged unless all status checks (Linting with Ruff, Type-checking with Mypy, and Test Suites with Pytest) pass successfully in our GitHub Actions pipeline.
 - **No Direct Pushes:** All code changes must go through a Pull Request. Direct pushes to protected branches are blocked.
 

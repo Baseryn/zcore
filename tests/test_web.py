@@ -1,27 +1,28 @@
-import uuid
-import inspect
 import asyncio
-import pytest
+import inspect
+import uuid
+from contextlib import asynccontextmanager, suppress
+from typing import Any, ClassVar
+from unittest.mock import AsyncMock, MagicMock
 
-from typing import Any
-from pydantic import BaseModel
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter
+import pytest
+from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import MagicMock, AsyncMock
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from zcore.kernel.di import container, _current_scope_id
+from zcore.context.context import ZContext
+from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
+from zcore.db.setup import db_manager
+from zcore.exceptions.base import AppException, EntityNotFound
+from zcore.exceptions.handlers import app_exception_handler
+from zcore.kernel.di import _current_scope_id, container
+from zcore.web.api_router import ZCoreRequest
 from zcore.web.base_router import BaseRouter, RouteKey
 from zcore.web.middleware import RequestLogMiddleware, ScopedDependencyMiddleware
 from zcore.web.projection import Zchema
-from zcore.web.api_router import ZCoreRequest
 from zcore.web.streams import StreamManager, init_stream_redis
-from zcore.context.context import ZContext
-from zcore.exceptions.base import EntityNotFound, AppException
-from zcore.exceptions.handlers import app_exception_handler
-from zcore.db.setup import db_manager
-from zcore.db.pagination import PageNumberPagination, PaginatedResult, PageNumberParams
+
 
 class DummyModel:
     __tablename__ = "dummy"
@@ -393,7 +394,7 @@ async def test_scoped_dependency_middleware_lifecycle(monkeypatch: pytest.Monkey
         assert data["scope_id"] is not None
         assert data["session_is_mock"] is True
     assert _current_scope_id.get() is None
-    with pytest.raises(Exception):
+    with pytest.raises((TypeError, Exception)):
         container.resolve(AsyncSession)
 
 @pytest.mark.anyio
@@ -417,7 +418,13 @@ def test_route_sorting_shadowing() -> None:
         schema_out = DummyOut
         service = DummyService
         prefix = "/test"
-        exclude = {RouteKey.POST, RouteKey.GET_ALL, RouteKey.UPDATE, RouteKey.PATCH, RouteKey.DELETE}
+        exclude: ClassVar[set[RouteKey]] = {
+            RouteKey.POST,
+            RouteKey.GET_ALL,
+            RouteKey.UPDATE,
+            RouteKey.PATCH,
+            RouteKey.DELETE,
+        }
     router_inst = SortRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/test/search" in paths
@@ -448,10 +455,8 @@ async def test_stream_manager_pubsub_lifecycle(monkeypatch: pytest.MonkeyPatch) 
     msg = queue.get_nowait()
     assert msg == {"msg": "local"}
     for i in range(105):
-        try:
+        with suppress(asyncio.QueueFull):
             queue.put_nowait({"msg": f"flood_{i}"})
-        except asyncio.QueueFull:
-            pass
     await sm._local_publish(u_id, {"msg": "overflow"})
     assert u_id not in sm.users_queues
     await sm.unsubscribe(u_id, queue)

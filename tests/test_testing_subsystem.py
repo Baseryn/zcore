@@ -1,17 +1,26 @@
-import pytest
 import asyncio
 import uuid
-
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
-from sqlalchemy import String, select, event
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, ClassVar
 
-from zcore import Base, container, settings, get_db, ctx, db_manager
-from zcore.testing import ZTestClient, BaseZTest, ZTestFixture, ZTest, ContainerSandbox, DatabaseRollback
-from zcore.security import get_current_user_stub, UserProtocol
+import pytest
+from fastapi import Depends, FastAPI
+from sqlalchemy import String, event, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
+
+from zcore import Base, container, ctx, db_manager, get_db, settings
 from zcore.context.context import _request_context_store
+from zcore.security import UserProtocol, get_current_user_stub
+from zcore.testing import (
+    BaseZTest,
+    ContainerSandbox,
+    DatabaseRollback,
+    ZTest,
+    ZTestClient,
+    ZTestFixture,
+)
+
 
 class DummyTask(Base):
     __tablename__ = "dummy_tasks"
@@ -92,12 +101,11 @@ async def test_database_rollback_isolation():
         assert res.status_code == 200
         task_id = res.json()["id"]
         
-    async with ZTestClient(dummy_app, use_db=True) as client:
-        async with db_manager.session() as session:
-            res = await session.execute(
-                select(DummyTask).where(DummyTask.id == uuid.UUID(task_id))
-            )
-            assert res.scalars().first() is None
+    async with ZTestClient(dummy_app, use_db=True) as client, db_manager.session() as session:
+        res = await session.execute(
+            select(DummyTask).where(DummyTask.id == uuid.UUID(task_id))
+        )
+        assert res.scalars().first() is None
 
 @pytest.mark.asyncio
 async def test_container_sandbox():
@@ -107,7 +115,7 @@ async def test_container_sandbox():
     interface = MockService
     implementation = MockService()
     
-    async with ZTestClient(dummy_app, use_db=False) as client:
+    async with ZTestClient(dummy_app, use_db=False):
         container.register_singleton(interface, implementation)
         assert container.resolve(interface) is implementation
         
@@ -158,7 +166,7 @@ async def test_extra_context_variables():
         user_id=uid,
         use_db=False,
         extra_context={"restricted_fields": frozenset(restricted)}
-    ) as client:
+    ):
         assert ctx.restricted_fields == frozenset(restricted)
 
 @pytest.mark.asyncio
@@ -166,8 +174,8 @@ class TestClassBasedExecution(BaseZTest):
     app = dummy_app
     user_id = uuid.uuid4()
     is_superuser = True
-    scopes = ["admin:delete"]
-    extra_user_attrs = {"phone_number": "09121111111"}
+    scopes: ClassVar[list[str]] = ["admin:delete"]
+    extra_user_attrs: ClassVar[dict[str, Any]] = {"phone_number": "09121111111"}
     
     async def test_class_based_test_run(self):
         async with self.run() as client:
@@ -187,12 +195,11 @@ async def test_database_rollback_nested_commit():
         assert res.status_code == 200
         task_id = res.json()["id"]
 
-    async with ZTestClient(dummy_app, use_db=True) as client:
-        async with db_manager.session() as session:
-            res = await session.execute(
-                select(DummyTask).where(DummyTask.id == uuid.UUID(task_id))
-            )
-            assert res.scalars().first() is None
+    async with ZTestClient(dummy_app, use_db=True) as client, db_manager.session() as session:
+        res = await session.execute(
+            select(DummyTask).where(DummyTask.id == uuid.UUID(task_id))
+        )
+        assert res.scalars().first() is None
 
 @pytest.mark.asyncio
 async def test_database_rollback_uninitialized_engine(monkeypatch: pytest.MonkeyPatch):
@@ -231,7 +238,7 @@ async def test_app_lifespan_execution():
     global lifespan_events
     lifespan_events.clear()
     
-    async with ZTestClient(lifespan_app, use_db=False) as client:
+    async with ZTestClient(lifespan_app, use_db=False):
         assert "started" in lifespan_events
         assert "shutdown" not in lifespan_events
         
@@ -266,7 +273,7 @@ async def test_user_context_exception_safety():
     original_store = dict(_request_context_store.get())
     
     try:
-        async with ZTestClient(dummy_app, user_id=uuid.uuid4(), use_db=False) as client:
+        async with ZTestClient(dummy_app, user_id=uuid.uuid4(), use_db=False):
             raise ValueError("Forced error within execution block")
     except ValueError:
         pass
@@ -278,10 +285,10 @@ async def test_nested_ztest_clients():
     user_id_outer = uuid.uuid4()
     user_id_inner = uuid.uuid4()
     
-    async with ZTestClient(dummy_app, user_id=user_id_outer, use_db=False) as client_outer:
+    async with ZTestClient(dummy_app, user_id=user_id_outer, use_db=False):
         assert ctx.user_id == user_id_outer
         
-        async with ZTestClient(dummy_app, user_id=user_id_inner, use_db=False) as client_inner:
+        async with ZTestClient(dummy_app, user_id=user_id_inner, use_db=False):
             assert ctx.user_id == user_id_inner
             
         assert ctx.user_id == user_id_outer
@@ -293,7 +300,7 @@ async def test_dependency_override_custom_preservation():
         
     dummy_app.dependency_overrides[DevelopmentCustomDep] = lambda: "developer_preset"
     
-    async with ZTestClient(dummy_app, user_id=uuid.uuid4(), use_db=False) as client:
+    async with ZTestClient(dummy_app, user_id=uuid.uuid4(), use_db=False):
         assert dummy_app.dependency_overrides.get(DevelopmentCustomDep)() == "developer_preset"
         
     assert dummy_app.dependency_overrides.get(DevelopmentCustomDep)() == "developer_preset"

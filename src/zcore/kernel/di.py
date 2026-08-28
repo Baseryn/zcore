@@ -6,8 +6,11 @@ to mitigate reflection runtime performance overhead, and implements protective m
 against cyclic dependencies.
 """
 
+import functools
 import inspect
-from collections.abc import Callable
+import uuid
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import (
     Annotated,
@@ -18,7 +21,9 @@ from typing import (
     get_type_hints,
 )
 
+from anyio import to_thread
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 T = TypeVar("T")
 
@@ -304,3 +309,98 @@ class Inject:
             An Annotated type wrapper containing the resolved target class.
         """
         return Annotated[interface, Depends(Injector(interface))]
+
+
+@asynccontextmanager
+async def background_scope(
+    inherit_context: bool = True,
+    **custom_context: Any,
+) -> AsyncGenerator[None, None]:
+    """Provide an isolated IoC, Database Session, and ZContext scope for background tasks.
+
+    Ensures that asynchronous background routines execute within an independent transaction
+    boundary and IoC scope without relying on or interfering with completed HTTP request lifecycles.
+    Automatically manages database session allocation, context variable isolation, and guaranteed
+    resource disposal upon exit.
+
+    Args:
+        inherit_context: If True, clones active request context parameters (e.g., user_id, scopes)
+            into the background scope. Defaults to True.
+        **custom_context: Explicit key-value pairs to set or override in the background context store.
+
+    Yields:
+        None within an active, isolated execution scope.
+    """
+    from zcore.context.context import _request_context_store
+    from zcore.db.setup import db_manager
+
+    scope_id = str(uuid.uuid4())
+    scope_token = _current_scope_id.set(scope_id)
+
+    initial_store = dict(_request_context_store.get()) if inherit_context else {}
+    initial_store.update(custom_context)
+    ctx_token = _request_context_store.set(initial_store)
+
+    try:
+        async with db_manager.session() as session:
+            container.register_scoped_instance(AsyncSession, session)
+            yield
+    finally:
+        container.clear_scope(scope_id)
+        _current_scope_id.reset(scope_token)
+        _request_context_store.reset(ctx_token)
+
+
+def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that wraps a background task with an isolated scope and auto-resolves dependencies.
+
+    Inspects the wrapped function's signature and automatically resolves any unprovided,
+    type-annotated parameters directly from the global IoC container. Supports both asynchronous
+    coroutines and standard synchronous functions (executed asynchronously in a worker threadpool).
+
+    Args:
+        func: The target synchronous or asynchronous callable to execute in the background.
+
+    Returns:
+        An asynchronous wrapped callable suitable for scheduling with FastAPI BackgroundTasks.
+    """
+    is_coroutine = inspect.iscoroutinefunction(func)
+
+    def _resolve_injections(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+        sig = inspect.signature(func)
+        bound_args = sig.bind_partial(*args, **kwargs)
+        resolved_kwargs = dict(kwargs)
+
+        for param_name, param in sig.parameters.items():
+            if param_name in bound_args.arguments:
+                continue
+            if param.default is not inspect.Parameter.empty:
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            if param.annotation is not inspect.Parameter.empty:
+                annotation = param.annotation
+                if get_origin(annotation) is Annotated:
+                    annotation = get_args(annotation)[0]
+                resolved_kwargs[param_name] = container.resolve(annotation)
+
+        return resolved_kwargs
+
+    if is_coroutine:
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async with background_scope():
+                final_kwargs = _resolve_injections(args, kwargs)
+                return await func(*args, **final_kwargs)
+
+        return async_wrapper
+    else:
+        @functools.wraps(func)
+        async def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async with background_scope():
+                final_kwargs = _resolve_injections(args, kwargs)
+                return await to_thread.run_sync(
+                    functools.partial(func, *args, **final_kwargs)
+                )
+
+        return sync_wrapper

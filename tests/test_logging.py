@@ -1,12 +1,14 @@
 import importlib
 import logging
 import sys
-from typing import Any, Type
-from unittest.mock import patch, MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pytest
 import structlog
 
 from zcore.config import settings
+
 
 @pytest.mark.parametrize(
     "is_atty, expected_renderer_cls",
@@ -18,7 +20,7 @@ from zcore.config import settings
 def test_logging_format_by_environment(
     monkeypatch: pytest.MonkeyPatch,
     is_atty: bool,
-    expected_renderer_cls: Type[Any]
+    expected_renderer_cls: type[Any]
 ) -> None:
     monkeypatch.setattr(sys.stderr, "isatty", lambda: is_atty)
     monkeypatch.setattr(settings, "DEBUG", is_atty)

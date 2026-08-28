@@ -1,6 +1,6 @@
 # Security Policy
 
-We take the security of ZCore, and the applications built on top of it, extremely seriously. Security is a core pillar of ZCore's design philosophy, integrated deeply into its architecture [security/jwt.py, security/hashing.py] rather than treated as an afterthought.
+We take the security of ZCore, and the applications built on top of it, extremely seriously. Security is a core pillar of ZCore's design philosophy, integrated deeply into its architecture (`zcore/security/security.py`, `zcore/web/projection.py`) rather than treated as an afterthought.
 
 If you believe you have found a security vulnerability in ZCore, please read this document to learn how to report it responsibly.
 
@@ -87,9 +87,9 @@ The following are generally **not considered** security vulnerabilities in ZCore
 
 ## Hardened Defaults in ZCore
 
-ZCore is built with strict, "secure-by-default" configurations [security/jwt.py, storage/local.py]:
-- **Production Secret Guard:** The framework will raise a fatal traceback and refuse to start in a production environment if the default fallback `SECRET_KEY` is detected [security/jwt.py]. 
-- **Argon2id default configuration:** We enforce high-entropy password hashing out-of-the-box [security/hashing.py].
-- **Path Traversal Protection:** The local storage provider strictly verifies resolved filesystem paths before running write or unlink operations [storage/local.py].
+ZCore is built with strict, "secure-by-default" configurations:
+- **Production Secret Guard:** The framework will raise a fatal traceback and refuse to start in a production environment if the default fallback `SECRET_KEY` is detected (`zcore/security/security.py`). 
+- **Argon2id default configuration:** We enforce high-entropy password hashing out-of-the-box (`zcore/security/security.py`).
+- **Path Traversal Protection:** The local storage provider strictly verifies resolved filesystem paths before running write or unlink operations (`zcore/storage/local.py`).
 
 *Note: ZCore only fails-fast (crashes) on fatal security configurations. Missing optional configuration elements (e.g., optional caching backends) will only raise non-fatal warnings.*

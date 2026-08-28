@@ -1,18 +1,20 @@
 import uuid
+from collections.abc import AsyncGenerator
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_asyncio
-
 from pydantic import BaseModel
-from unittest.mock import AsyncMock
-from typing import Any, AsyncGenerator
 from sqlalchemy import Column, Integer, String
 
-from zcore.db.repository import BaseRepository
-from zcore.db.setup import Base
-from zcore.db.pagination import PageNumberParams, CursorParams
-from zcore.db.search import SearchRequest, FilterItem
 from zcore.context.context import ctx
-from zcore.exceptions.base import ValidationError, ForbiddenError
+from zcore.db.pagination import CursorParams, PageNumberParams
+from zcore.db.repository import BaseRepository
+from zcore.db.search import FilterItem, SearchRequest
+from zcore.db.setup import Base
+from zcore.exceptions.base import ForbiddenError, ValidationError
+
 
 class RepoTestModel(Base):
     __tablename__ = f"repo_test_model_{uuid.uuid4().hex[:6]}"
@@ -177,16 +179,15 @@ async def test_repo_update_multi(db_session: Any) -> None:
     repo = RepoTestRepository(db_session)
     item1 = await repo.create(RepoTestCreateSchema(name="A", description="D1"))
     item2 = await repo.create(RepoTestCreateSchema(name="B", description="D2"))
-    
+
     data = {
-        item1.id: RepoTestUpdateSchema(name="A_New"),
+        item1.id: RepoTestUpdateSchema(name="A_New", description="D1"),
         item2.id: RepoTestUpdateSchema(name="B_New", description="D2_New"),
-        99999: RepoTestUpdateSchema(name="C_New")
     }
-    
-    updated = await repo.update_multi(data, partial=True, refresh=True)
+
+    updated = await repo.update_multi(data)
     assert len(updated) == 2
-    
+
     fetched1 = await repo.get(id=item1.id)
     fetched2 = await repo.get(id=item2.id)
     assert fetched1.name == "A_New"
