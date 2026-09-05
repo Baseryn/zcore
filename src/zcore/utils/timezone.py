@@ -6,12 +6,15 @@ standard `zoneinfo.ZoneInfo` (IANA database) with built-in fallback to `datetime
 
 import functools
 import zoneinfo
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import structlog
 from pydantic import PlainSerializer
 
 from zcore.config import settings
+
+logger = structlog.get_logger()
 
 
 @functools.lru_cache(maxsize=16)
@@ -19,15 +22,21 @@ def get_app_timezone() -> Any:
     """Retrieve and cache the active application ZoneInfo object based on settings.
 
     Returns:
-        A timezone instance representing the application's configured timezone.
+        A timezone instance representing the application's configured timezone,
+        falling back to UTC if the configured identifier is invalid.
     """
     tz_name = getattr(settings, "TIMEZONE", "UTC")
     if not tz_name or str(tz_name).upper() == "UTC":
-        return timezone.utc
+        return UTC
     try:
         return zoneinfo.ZoneInfo(tz_name)
-    except Exception:
-        return timezone.utc
+    except Exception as e:
+        logger.warning(
+            "Invalid timezone configured, falling back to UTC",
+            timezone=tz_name,
+            error=str(e),
+        )
+        return UTC
 
 
 def now() -> datetime:
@@ -45,7 +54,7 @@ def utc_now() -> datetime:
     Returns:
         Current datetime instance bound to UTC.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def to_app_timezone(dt: datetime | None) -> datetime | None:
@@ -65,7 +74,7 @@ def to_app_timezone(dt: datetime | None) -> datetime | None:
 
     target_tz = get_app_timezone()
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
 
     return dt.astimezone(target_tz)
 
