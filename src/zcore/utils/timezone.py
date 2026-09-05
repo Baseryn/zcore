@@ -1,15 +1,13 @@
 """ZCore Dynamic Timezone and DateTime Management Module.
 
 This module provides timezone-aware datetime utilities leveraging Python's
-standard `zoneinfo.ZoneInfo` (IANA database). It coordinates application-level
-timezone conversions, timezone-aware current time generation, and automated
-ISO 8601 formatting with offsets.
+standard `zoneinfo.ZoneInfo` (IANA database) with built-in fallback to `datetime.timezone.utc`.
 """
 
 import functools
 import zoneinfo
-from datetime import UTC, datetime
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Any
 
 from pydantic import PlainSerializer
 
@@ -17,18 +15,19 @@ from zcore.config import settings
 
 
 @functools.lru_cache(maxsize=16)
-def get_app_timezone() -> zoneinfo.ZoneInfo:
+def get_app_timezone() -> Any:
     """Retrieve and cache the active application ZoneInfo object based on settings.
 
     Returns:
-        A ZoneInfo instance representing the application's configured timezone,
-        falling back to UTC if the configured identifier is invalid.
+        A timezone instance representing the application's configured timezone.
     """
     tz_name = getattr(settings, "TIMEZONE", "UTC")
+    if not tz_name or str(tz_name).upper() == "UTC":
+        return timezone.utc
     try:
         return zoneinfo.ZoneInfo(tz_name)
     except Exception:
-        return zoneinfo.ZoneInfo("UTC")
+        return timezone.utc
 
 
 def now() -> datetime:
@@ -46,7 +45,7 @@ def utc_now() -> datetime:
     Returns:
         Current datetime instance bound to UTC.
     """
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def to_app_timezone(dt: datetime | None) -> datetime | None:
@@ -66,7 +65,7 @@ def to_app_timezone(dt: datetime | None) -> datetime | None:
 
     target_tz = get_app_timezone()
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        dt = dt.replace(tzinfo=timezone.utc)
 
     return dt.astimezone(target_tz)
 
