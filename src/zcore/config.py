@@ -10,11 +10,26 @@ across the application lifecycle.
 import os
 from typing import Any, TypeVar, cast
 
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from zcore.kernel.di import container
 
 T = TypeVar("T", bound="Settings")
+
+
+class DatabaseSettings(BaseModel):
+    """Database connection and engine configuration schema."""
+
+    url: str = "sqlite+aiosqlite:///zcore.db"
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_recycle: int = 1800
+    pool_pre_ping: bool = True
+    echo: bool = False
+    connect_args: dict[str, Any] = Field(default_factory=dict)
+    execution_options: dict[str, Any] = Field(default_factory=dict)
+    extra_engine_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class Settings(BaseSettings):
