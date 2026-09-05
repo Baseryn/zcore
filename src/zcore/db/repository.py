@@ -319,12 +319,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         Args:
             data: A mapping of primary keys to their update schemas.
+            partial: If True, ignores unset schema fields. Defaults to False.
+            refresh: Parameter maintained for interface consistency. Defaults to False.
 
         Returns:
             A sequence containing the updated database model instances.
-
-        Raises:
-            sqlalchemy.orm.exc.StaleDataError: If any target primary key does not exist.
         """
         if not data:
             return []
