@@ -19,11 +19,14 @@ class ServiceTestModel(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
 
+
 class ServiceTestCreateSchema(BaseModel):
     name: str
 
+
 class ServiceTestUpdateSchema(BaseModel):
     name: str
+
 
 class HookTrackingService(BaseService[ServiceTestModel]):
     def __init__(self, model: type[ServiceTestModel], repository: Any) -> None:
@@ -62,7 +65,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         for m in models:
             m.name = m.name + "_BULKAUDITED"
 
-    async def pre_update(self, id: Any, schema: ServiceTestUpdateSchema, partial: bool) -> dict[str, Any] | None:
+    async def pre_update(self, target: ServiceTestModel | Any, schema: ServiceTestUpdateSchema, partial: bool) -> dict[str, Any] | None:
         self.hooks_called.append("pre_update")
         schema.name = "UPDATED_HOOK_" + schema.name
         return None
@@ -71,7 +74,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         self.hooks_called.append("post_update")
         model.name = model.name + "_UPDATED"
 
-    async def pre_update_multi(self, data: dict[Any, BaseModel], partial: bool) -> None:
+    async def pre_update_multi(self, data: dict[ServiceTestModel | Any, BaseModel], partial: bool) -> None:
         self.hooks_called.append("pre_update_multi")
         for _k, v in data.items():
             v.name = "BULK_UPD_" + v.name
@@ -81,7 +84,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         for m in models:
             m.name = m.name + "_BULKUPDATED"
 
-    async def pre_delete(self, id: Any) -> None:
+    async def pre_delete(self, target: Any) -> None:
         self.hooks_called.append("pre_delete")
 
     async def post_delete(self, model: ServiceTestModel) -> None:
@@ -103,6 +106,7 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         self.hooks_called.append("post_search")
         for m in models:
             m.name = m.name + "_SEARCHED"
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
@@ -137,6 +141,7 @@ async def test_service_pre_post_hooks(
     assert "post_create" in service.hooks_called
     assert result.name == expected_final_name
     mock_repo.create.assert_called_once()
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
@@ -184,6 +189,7 @@ async def test_service_safe_commit_scenarios(
             mock_db.commit.assert_not_called()
             mock_db.rollback.assert_not_called()
 
+
 @pytest.mark.anyio
 async def test_service_post_get_hook() -> None:
     mock_repo = AsyncMock()
@@ -195,6 +201,7 @@ async def test_service_post_get_hook() -> None:
     
     assert "post_get" in service.hooks_called
     assert result.name == "Database_GETHOOKED"
+
 
 @pytest.mark.anyio
 async def test_service_post_get_multi_hook() -> None:
@@ -209,6 +216,7 @@ async def test_service_post_get_multi_hook() -> None:
     assert results[0].name == "R1_GETMULTIHOCKED"
     assert results[1].name == "R2_GETMULTIHOCKED"
 
+
 @pytest.mark.anyio
 async def test_service_get_entity_not_found() -> None:
     mock_repo = AsyncMock()
@@ -219,6 +227,7 @@ async def test_service_get_entity_not_found() -> None:
         await service.get(id=999)
         
     assert "post_get" not in service.hooks_called
+
 
 @pytest.mark.anyio
 async def test_service_get_list_pagination() -> None:
@@ -234,6 +243,7 @@ async def test_service_get_list_pagination() -> None:
     assert result.data[0].name == "R1_GETMULTIHOCKED"
     assert result.data[1].name == "R2_GETMULTIHOCKED"
     assert result.meta["page"] == 1
+
 
 @pytest.mark.anyio
 async def test_service_pre_create_extra_data_merge() -> None:
@@ -254,6 +264,7 @@ async def test_service_pre_create_extra_data_merge() -> None:
     await service.create(schema, extra_field="yes")
     
     assert "pre_create" in service.hooks_called
+
 
 @pytest.mark.anyio
 async def test_service_create_multi_hooks() -> None:
@@ -276,6 +287,7 @@ async def test_service_create_multi_hooks() -> None:
     assert results[0].name == "BULK_S1_BULKAUDITED"
     assert results[1].name == "BULK_S2_BULKAUDITED"
 
+
 @pytest.mark.anyio
 async def test_service_update_multi_hooks() -> None:
     mock_db = MagicMock()
@@ -283,8 +295,8 @@ async def test_service_update_multi_hooks() -> None:
     mock_repo = AsyncMock()
     mock_repo.db = mock_db
     
-    async def fake_update_multi(data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False) -> Sequence[ServiceTestModel]:
-        return [ServiceTestModel(id=k, name=v.name) for k, v in data.items()]
+    async def fake_update_multi(data: dict[ServiceTestModel | Any, BaseModel], partial: bool = False, refresh: bool = False) -> Sequence[ServiceTestModel]:
+        return [ServiceTestModel(id=getattr(k, "id", k), name=v.name) for k, v in data.items()]
         
     mock_repo.update_multi.side_effect = fake_update_multi
     
@@ -300,6 +312,7 @@ async def test_service_update_multi_hooks() -> None:
     assert results[0].name == "BULK_UPD_U1_BULKUPDATED"
     assert results[1].name == "BULK_UPD_U2_BULKUPDATED"
 
+
 @pytest.mark.anyio
 async def test_service_update_entity_not_found() -> None:
     mock_repo = AsyncMock()
@@ -309,9 +322,10 @@ async def test_service_update_entity_not_found() -> None:
     schema = ServiceTestUpdateSchema(name="Fresh")
     
     with pytest.raises(EntityNotFound):
-        await service.update(id=999, schema=schema)
+        await service.update(target=999, schema=schema)
         
     assert "post_update" not in service.hooks_called
+
 
 @pytest.mark.anyio
 async def test_service_delete_hooks() -> None:
@@ -324,11 +338,12 @@ async def test_service_delete_hooks() -> None:
     mock_repo.delete.return_value = record
     
     service = HookTrackingService(ServiceTestModel, mock_repo)
-    result = await service.delete(id=1)
+    result = await service.delete(target=1)
     
     assert "pre_delete" in service.hooks_called
     assert "post_delete" in service.hooks_called
     assert result.name == "ToKill_DELETED"
+
 
 @pytest.mark.anyio
 async def test_service_delete_multi_hooks() -> None:
@@ -348,6 +363,7 @@ async def test_service_delete_multi_hooks() -> None:
     assert results[0].name == "K1_BULKDELETED"
     assert results[1].name == "K2_BULKDELETED"
 
+
 @pytest.mark.anyio
 async def test_service_delete_entity_not_found() -> None:
     mock_repo = AsyncMock()
@@ -356,9 +372,10 @@ async def test_service_delete_entity_not_found() -> None:
     service = HookTrackingService(ServiceTestModel, mock_repo)
     
     with pytest.raises(EntityNotFound):
-        await service.delete(id=999)
+        await service.delete(target=999)
         
     assert "post_delete" not in service.hooks_called
+
 
 @pytest.mark.anyio
 async def test_service_search_hooks() -> None:
@@ -374,6 +391,7 @@ async def test_service_search_hooks() -> None:
     assert "post_search" in service.hooks_called
     assert results[0].name == "Found1_SEARCHED"
     assert results[1].name == "Found2_SEARCHED"
+
 
 @pytest.mark.anyio
 async def test_service_search_pagination() -> None:
@@ -391,6 +409,7 @@ async def test_service_search_pagination() -> None:
     assert result.data[0].name == "Found1_SEARCHED"
     assert result.data[1].name == "Found2_SEARCHED"
     assert result.meta["page"] == 1
+
 
 @pytest.mark.anyio
 async def test_service_post_create_error_rollback() -> None:
