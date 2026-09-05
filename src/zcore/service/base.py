@@ -259,9 +259,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
 
-    async def on_delete(self, id: Any) -> ModelType | None:
+    async def on_delete(self, target: ModelType | Any) -> ModelType | None:
         """Execute core single-record deletion in database."""
-        return await self.repository.delete(id)
+        return await self.repository.delete(target)
 
     async def on_delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
         """Execute core batch-record deletions in database."""
@@ -339,10 +339,20 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def delete(self, id: Any) -> ModelType:
-        """Orchestrate the deletion and cleanup of a single domain entity."""
-        await self.pre_delete(id)
-        result = await self.on_delete(id)
+    async def delete(self, target: ModelType | Any) -> ModelType:
+        """Orchestrate the deletion and cleanup of a single domain entity.
+
+        Args:
+            target: The model instance or primary key value of the target record to delete.
+
+        Returns:
+            The deleted database model instance.
+
+        Raises:
+            EntityNotFound: If the target entity identifier is not found in the database.
+        """
+        await self.pre_delete(target)
+        result = await self.on_delete(target)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         await self.post_delete(result)
