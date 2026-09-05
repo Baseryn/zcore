@@ -8,7 +8,7 @@ ISO 8601 formatting with offsets.
 
 import functools
 import zoneinfo
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from pydantic import PlainSerializer
@@ -46,7 +46,7 @@ def utc_now() -> datetime:
     Returns:
         Current datetime instance bound to UTC.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def to_app_timezone(dt: datetime | None) -> datetime | None:
@@ -66,7 +66,7 @@ def to_app_timezone(dt: datetime | None) -> datetime | None:
 
     target_tz = get_app_timezone()
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
 
     return dt.astimezone(target_tz)
 
