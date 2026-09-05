@@ -189,7 +189,8 @@ def test_logging_settings_model_defaults_and_custom() -> None:
     ]
     assert default_log.custom_processors == []
 
-    dummy_processor = lambda logger, method, event_dict: event_dict
+    def dummy_processor(logger, method, event_dict):
+        return event_dict
     custom_log = LoggingSettings(
         level="DEBUG",
         json_format=True,

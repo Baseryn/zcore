@@ -111,10 +111,16 @@ class Settings(BaseSettings):
             self.DATABASE.url = self.DATABASE_URL
         elif self.DATABASE.url != "sqlite+aiosqlite:///zcore.db" and self.DATABASE_URL == "sqlite+aiosqlite:///zcore.db":
             self.DATABASE_URL = self.DATABASE.url
+
         if self.POOL_SIZE != 5 and self.DATABASE.pool_size == 5:
             self.DATABASE.pool_size = self.POOL_SIZE
+        elif self.DATABASE.pool_size != 5 and self.POOL_SIZE == 5:
+            self.POOL_SIZE = self.DATABASE.pool_size
+
         if self.MAX_OVERFLOW != 10 and self.DATABASE.max_overflow == 10:
             self.DATABASE.max_overflow = self.MAX_OVERFLOW
+        elif self.DATABASE.max_overflow != 10 and self.MAX_OVERFLOW == 10:
+            self.MAX_OVERFLOW = self.DATABASE.max_overflow
 
         if self.LOG_LEVEL != "INFO" and self.LOGGING.level == "INFO":
             self.LOGGING.level = self.LOG_LEVEL
