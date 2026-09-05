@@ -248,7 +248,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     async def create_multi(
         self, schemas: list[BaseModel], refresh: bool = False
     ) -> Sequence[ModelType]:
-        """Create multiple database records from a list of validation schemas.
+        """Create multiple database records with dialect-aware fallback for returning support.
 
         Args:
             schemas: A list of Pydantic schemas representing the new database objects.
@@ -262,10 +262,26 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return []
 
         payloads = [schema.model_dump() for schema in schemas]
-        stmt = insert(self.model).values(payloads).returning(self.model)
-        result = await self.db.execute(stmt)
-        await self.db.flush()
-        return list(result.scalars().all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "insert_returning", False))
+
+        if supports_returning:
+            stmt = insert(self.model).values(payloads).returning(self.model)
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            records = list(result.scalars().all())
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
+        else:
+            records = [self.model(**p) for p in payloads]
+            self.db.add_all(records)
+            await self.db.flush()
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
 
     async def update(
         self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
