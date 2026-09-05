@@ -314,7 +314,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self, data: dict[ModelType | Any, BaseModel], partial: bool = False, refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Bulk update multiple database records using DBAPI executemany.
 
@@ -349,18 +349,22 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         return await self.get_by_ids(ids=target_ids)
 
-    async def delete(self, id: Any) -> ModelType | None:
-        """Delete a single record by its primary key identifier.
+    async def delete(self, target: ModelType | Any) -> ModelType | None:
+        """Delete a single record by its model instance or primary key identifier.
 
         Args:
-            id: The primary key value of the target record to delete.
+            target: The model instance or primary key value of the target record to delete.
 
         Returns:
             The deleted database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         await self.db.delete(record)
         await self.db.flush()
         return record
