@@ -31,6 +31,23 @@ class DatabaseSettings(BaseModel):
     execution_options: dict[str, Any] = Field(default_factory=dict)
     extra_engine_kwargs: dict[str, Any] = Field(default_factory=dict)
 
+class LoggingSettings(BaseModel):
+    """Structured logging configuration schema."""
+
+    level: str = "INFO"
+    json_format: bool | None = None
+    log_sql_queries: bool = True
+    slow_query_threshold_ms: float | None = None
+    file_path: str | None = None
+    muted_loggers: list[str] = Field(
+        default_factory=lambda: [
+            "uvicorn",
+            "uvicorn.access",
+            "uvicorn.error",
+            "sqlalchemy.engine",
+        ]
+    )
+    custom_processors: list[Any] = Field(default_factory=list)
 
 class Settings(BaseSettings):
     """Core settings and environment variables configuration for the ZCore framework.
