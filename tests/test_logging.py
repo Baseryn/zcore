@@ -131,17 +131,26 @@ def test_dynamic_log_level_configuration(
 
 
 def test_log_filtering_enforcement_in_action() -> None:
+    class DummyHandler(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.records: list[logging.LogRecord] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.records.append(record)
+
     logger = logging.getLogger("test_filter_logger")
     logger.setLevel(logging.INFO)
-    mock_handler = MagicMock()
-    logger.handlers = [mock_handler]
-    
+    logger.propagate = False
+    handler = DummyHandler()
+    logger.handlers = [handler]
+
     logger.info("info_msg")
-    assert mock_handler.handle.called
-    
-    mock_handler.reset_mock()
+    assert len(handler.records) == 1
+    assert handler.records[0].getMessage() == "info_msg"
+
     logger.debug("debug_msg")
-    assert not mock_handler.handle.called
+    assert len(handler.records) == 1
 
 
 def test_contextvars_binding_verification() -> None:
