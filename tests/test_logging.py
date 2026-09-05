@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import structlog
 
-from zcore.config import settings
+from zcore.config import LoggingSettings, settings
 
 
 @pytest.mark.parametrize(
@@ -40,18 +40,18 @@ def test_logging_format_by_environment(
 def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
     loggers = ["uvicorn", "uvicorn.access", "sqlalchemy.engine"]
     dummy_handlers = {name: [logging.NullHandler()] for name in loggers}
-    
+
     for name in loggers:
         logger = logging.getLogger(name)
         logger.handlers = list(dummy_handlers[name])
         logger.propagate = False
-        
+
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-    
+
     with patch("structlog.configure"):
         logging_config.setup_logging()
-        
+
     for name in loggers:
         logger = logging.getLogger(name)
         assert len(logger.handlers) == 0
@@ -61,12 +61,12 @@ def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize("rich_installed", [True, False])
 def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_installed: bool) -> None:
     monkeypatch.setattr(settings, "DEBUG", True)
-    
+
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-    
+
     mock_install = MagicMock()
-    
+
     def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
         if name == "rich.traceback":
             if rich_installed:
@@ -75,14 +75,14 @@ def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_insta
                 return mock_module
             raise ImportError()
         return original_import(name, *args, **kwargs)
-        
+
     import builtins
     original_import = builtins.__import__
     monkeypatch.setattr(builtins, "__import__", mock_import)
-    
+
     with patch("structlog.configure"):
         logging_config.setup_logging()
-        
+
     if rich_installed:
         mock_install.assert_called_once_with(show_locals=False)
     else:
@@ -91,18 +91,18 @@ def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_insta
 
 def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "DEBUG", False)
-    
+
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-    
+
     with patch("structlog.configure") as mock_configure:
         logging_config.setup_logging()
         configured_processors = mock_configure.call_args[1].get("processors", [])
-        
+
         assert structlog.contextvars.merge_contextvars in configured_processors
         assert structlog.stdlib.add_log_level in configured_processors
         assert structlog.processors.format_exc_info in configured_processors
-        
+
         assert any(isinstance(p, structlog.stdlib.PositionalArgumentsFormatter) for p in configured_processors)
         assert any(isinstance(p, structlog.processors.TimeStamper) for p in configured_processors)
 
@@ -121,10 +121,10 @@ def test_dynamic_log_level_configuration(
     expected_level: int
 ) -> None:
     monkeypatch.setattr(settings, "LOG_LEVEL", log_level_setting)
-    
+
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-    
+
     with patch("structlog.configure"):
         logging_config.setup_logging(log_level=log_level_setting)
         assert logging.getLogger().level == expected_level
@@ -156,20 +156,104 @@ def test_log_filtering_enforcement_in_action() -> None:
 def test_contextvars_binding_verification() -> None:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(request_id="test_req_xyz")
-    
+
     event_dict = structlog.contextvars.merge_contextvars(None, None, {"event": "hello"})
     assert event_dict.get("request_id") == "test_req_xyz"
-    
+
     structlog.contextvars.clear_contextvars()
 
 
 def test_factory_and_caching_configurations(monkeypatch: pytest.MonkeyPatch) -> None:
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
-    
+
     with patch("structlog.configure") as mock_configure:
         logging_config.setup_logging()
-        
+
         kwargs = mock_configure.call_args[1]
         assert isinstance(kwargs.get("logger_factory"), structlog.stdlib.LoggerFactory)
         assert kwargs.get("cache_logger_on_first_use") is True
+
+
+def test_setup_logging_with_logging_settings_object() -> None:
+    custom_cfg = LoggingSettings(level="DEBUG", json_format=True)
+    import zcore.logging.config as logging_config
+    importlib.reload(logging_config)
+
+    with patch("structlog.configure"):
+        logging_config.setup_logging(config=custom_cfg)
+        root_logger = logging.getLogger()
+        assert root_logger.level == logging.DEBUG
+        formatter = root_logger.handlers[0].formatter
+        assert isinstance(formatter.processors[-1], structlog.processors.JSONRenderer)
+
+    dict_cfg = {"level": "WARNING", "json_format": False}
+    with patch("structlog.configure"):
+        logging_config.setup_logging(config=dict_cfg)
+        root_logger = logging.getLogger()
+        assert root_logger.level == logging.WARNING
+
+
+def test_setup_logging_rotating_file_handler(tmp_path: Any) -> None:
+    from logging.handlers import RotatingFileHandler
+
+    log_file = tmp_path / "test_app.log"
+    cfg = LoggingSettings(file_path=str(log_file))
+
+    import zcore.logging.config as logging_config
+    importlib.reload(logging_config)
+
+    with patch("structlog.configure"):
+        logging_config.setup_logging(config=cfg)
+        root_logger = logging.getLogger()
+        file_handlers = [h for h in root_logger.handlers if isinstance(h, RotatingFileHandler)]
+        assert len(file_handlers) == 1
+        fh = file_handlers[0]
+        assert fh.maxBytes == 10 * 1024 * 1024
+        assert fh.backupCount == 5
+        assert fh.baseFilename == str(log_file)
+
+
+def test_setup_logging_dict_config_override() -> None:
+    dict_cfg = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "INFO",
+            }
+        },
+        "root": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+    }
+    import zcore.logging.config as logging_config
+    importlib.reload(logging_config)
+
+    with patch("logging.config.dictConfig") as mock_dict_config:
+        logging_config.setup_logging(dict_config=dict_cfg)
+        mock_dict_config.assert_called_once_with(dict_cfg)
+
+
+def test_setup_logging_extra_handlers_and_custom_processors() -> None:
+    dummy_handler = logging.NullHandler()
+    def dummy_proc(logger, method, event_dict):
+        return event_dict
+
+    import zcore.logging.config as logging_config
+    importlib.reload(logging_config)
+
+    with patch("structlog.configure") as mock_configure:
+        logging_config.setup_logging(
+            custom_processors=[dummy_proc],
+            extra_handlers=[dummy_handler],
+        )
+        root_logger = logging.getLogger()
+        assert dummy_handler in root_logger.handlers
+        assert dummy_handler.formatter is not None
+
+        mock_configure.assert_called_once()
+        configured_procs = mock_configure.call_args[1].get("processors", [])
+        assert dummy_proc in configured_procs
