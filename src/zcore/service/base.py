@@ -241,13 +241,20 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return await self.repository.create_multi(schemas, refresh=refresh)
 
     async def on_update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self,
+        target: ModelType | Any,
+        schema: BaseModel,
+        partial: bool = False,
+        **extra_data: Any,
     ) -> ModelType | None:
         """Execute core single-record update in database."""
-        return await self.repository.update(id, schema, partial, **extra_data)
+        return await self.repository.update(target, schema, partial, **extra_data)
 
     async def on_update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self,
+        data: dict[ModelType | Any, BaseModel],
+        partial: bool = False,
+        refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
