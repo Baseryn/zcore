@@ -318,11 +318,8 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     ) -> Sequence[ModelType]:
         """Bulk update multiple database records using DBAPI executemany.
 
-        Executes the updates without hydrating ORM entities beforehand, then fetches
-        and returns the updated model instances in a single batch query.
-
         Args:
-            data: A mapping of primary keys to their update schemas.
+            data: A mapping of model instances or primary keys to their update schemas.
             partial: If True, ignores unset schema fields. Defaults to False.
             refresh: Parameter maintained for interface consistency. Defaults to False.
 
@@ -332,13 +329,17 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not data:
             return []
 
-        payloads = [
-            {
-                **schema.model_dump(exclude_unset=partial),
-                self.pk_name: pk_val,
-            }
-            for pk_val, schema in data.items()
-        ]
+        payloads = []
+        target_ids = []
+        for key, schema in data.items():
+            pk_val = getattr(key, self.pk_name, key)
+            target_ids.append(pk_val)
+            payloads.append(
+                {
+                    **schema.model_dump(exclude_unset=partial),
+                    self.pk_name: pk_val,
+                }
+            )
 
         await self.db.execute(
             update(self.model),
@@ -346,7 +347,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         )
         await self.db.flush()
 
-        return await self.get_by_ids(ids=list(data.keys()))
+        return await self.get_by_ids(ids=target_ids)
 
     async def delete(self, id: Any) -> ModelType | None:
         """Delete a single record by its primary key identifier.
