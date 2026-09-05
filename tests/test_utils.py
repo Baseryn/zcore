@@ -2,11 +2,22 @@ import datetime
 import uuid
 from decimal import Decimal
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+from pydantic import BaseModel
 
+from zcore.config import settings
 from zcore.exceptions.base import ValidationError
 from zcore.utils.helpers import json_dumps, json_loads, slugify
+from zcore.utils.timezone import (
+    ZDateTime,
+    format_iso_with_app_timezone,
+    get_app_timezone,
+    now,
+    to_app_timezone,
+    utc_now,
+)
 from zcore.utils.validators import validate_json_schema
 
 
@@ -245,3 +256,117 @@ def test_validate_json_schema_additional_properties() -> None:
     invalid_data = {"id": 1, "extra": "forbidden"}
     with pytest.raises(ValidationError):
         validate_json_schema(invalid_data, schema)
+
+
+def test_get_app_timezone_valid_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "UTC")
+    assert get_app_timezone() == datetime.UTC
+
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+    tz = get_app_timezone()
+    assert str(tz) == "Asia/Tehran"
+
+    info_before = get_app_timezone.cache_info()
+    cached_tz = get_app_timezone()
+    info_after = get_app_timezone.cache_info()
+    assert cached_tz is tz
+    assert info_after.hits == info_before.hits + 1
+    get_app_timezone.cache_clear()
+
+
+def test_get_app_timezone_invalid_fallback_and_warning_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Invalid/NonExistent_Timezone")
+    with patch("zcore.utils.timezone.logger.warning") as mock_warn:
+        tz = get_app_timezone()
+        assert tz == datetime.UTC
+        mock_warn.assert_called_once()
+        assert mock_warn.call_args[1]["timezone"] == "Invalid/NonExistent_Timezone"
+    get_app_timezone.cache_clear()
+
+
+def test_now_and_utc_now_timezone_awareness(monkeypatch: pytest.MonkeyPatch) -> None:
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+    current_now = now()
+    current_utc = utc_now()
+
+    assert current_now.tzinfo is not None
+    assert str(current_now.tzinfo) == "Asia/Tehran"
+    assert current_utc.tzinfo == datetime.UTC
+    get_app_timezone.cache_clear()
+
+
+def test_to_app_timezone_naive_and_aware(monkeypatch: pytest.MonkeyPatch) -> None:
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+
+    assert to_app_timezone(None) is None
+
+    naive_dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
+    converted_naive = to_app_timezone(naive_dt)
+    assert converted_naive is not None
+    assert str(converted_naive.tzinfo) == "Asia/Tehran"
+    assert converted_naive.hour == 13
+    assert converted_naive.minute == 30
+
+    aware_dt = datetime.datetime(2026, 7, 2, 10, 0, 0, tzinfo=datetime.UTC)
+    converted_aware = to_app_timezone(aware_dt)
+    assert converted_aware is not None
+    assert str(converted_aware.tzinfo) == "Asia/Tehran"
+    assert converted_aware == aware_dt
+    get_app_timezone.cache_clear()
+
+
+def test_format_iso_with_app_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_app_timezone.cache_clear()
+    assert format_iso_with_app_timezone(None) is None
+
+    monkeypatch.setattr(settings, "TIMEZONE", "UTC")
+    utc_dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
+    assert format_iso_with_app_timezone(utc_dt) == "2026-07-02T10:00:00+00:00"
+
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+    assert format_iso_with_app_timezone(utc_dt) == "2026-07-02T13:30:00+03:30"
+    get_app_timezone.cache_clear()
+
+
+def test_zdatetime_pydantic_field_serialization(monkeypatch: pytest.MonkeyPatch) -> None:
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+
+    class EventSchema(BaseModel):
+        created_at: ZDateTime
+
+    event = EventSchema(created_at=datetime.datetime(2026, 7, 2, 10, 0, 0))
+    serialized_dict = event.model_dump(mode="json")
+    assert serialized_dict["created_at"] == "2026-07-02T13:30:00+03:30"
+    get_app_timezone.cache_clear()
+
+
+def test_custom_json_encoder_auto_convert_timezone_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
+
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+    monkeypatch.setattr(settings, "AUTO_CONVERT_TIMEZONE", True)
+    assert json_loads(json_dumps(dt)) == "2026-07-02T13:30:00+03:30"
+
+    monkeypatch.setattr(settings, "AUTO_CONVERT_TIMEZONE", False)
+    assert json_loads(json_dumps(dt)) == "2026-07-02T10:00:00"
+    get_app_timezone.cache_clear()
