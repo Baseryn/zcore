@@ -1,29 +1,20 @@
+"""ZCore CLI Scaffolding Templates."""
+
 MAIN_PY_TEMPLATE = """import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
-from zcore import Kernel, settings
-from zcore.web import RequestLogMiddleware, ScopedDependencyMiddleware
-from zcore.exceptions import app_exception_handler, AppException
-from zcore.db import db_manager, register_db_event_dispatcher
+from zcore import Kernel, db_manager, register_db_event_dispatcher, settings
+from zcore.exceptions import AppException, app_exception_handler
 from zcore.logging import setup_logging
+from zcore.web import RequestLogMiddleware, ScopedDependencyMiddleware
 
-# Initialize Structured Logging
 setup_logging()
 
-# Initialize Database Manager (SQLAlchemy Async Engine)
-db_manager.init_app(
-    db_url=settings.DATABASE_URL,
-    pool_size=settings.POOL_SIZE,
-    max_overflow=settings.MAX_OVERFLOW,
-    echo=(settings.DEBUG)
-)
+db_manager.init_app(config=settings.DATABASE)
 
-# Initialize ZCore Kernel & Plugins
 kernel = Kernel()
-
-# Register global database event dispatcher
 register_db_event_dispatcher(kernel.dispatcher)
 
 app = FastAPI(
@@ -33,11 +24,9 @@ app = FastAPI(
 
 kernel.setup(app)
 
-# Load Core Architectural Middlewares
 app.add_middleware(RequestLogMiddleware)
 app.add_middleware(ScopedDependencyMiddleware)
 
-# Register Centralized Error Handlers
 app.add_exception_handler(AppException, app_exception_handler)
 
 @app.get("/")
@@ -45,6 +34,7 @@ async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
+        "version": "0.1.0-beta.9",
         "debug": settings.DEBUG
     }
 """
@@ -57,6 +47,7 @@ PORT=8000
 # --- ZCore Application Settings ---
 PROJECT_NAME="{project_name}"
 DEBUG=True
+TIMEZONE="UTC"
 
 DATABASE_URL=sqlite+aiosqlite:///zcore_dev.db
 DATABASE_TEST_URL=sqlite+aiosqlite:///zcore_test.db
@@ -121,29 +112,23 @@ env/
 .env.*
 """
 
-# --- App Module Templates ---
-
-MODEL_TEMPLATE = """from zcore import Base
-from sqlalchemy.orm import Mapped, mapped_column
+MODEL_TEMPLATE = """import uuid
 from sqlalchemy import String
-import uuid
+from sqlalchemy.orm import Mapped, mapped_column
+from zcore import Base
 
 class {ModelName}(Base):
     __tablename__ = "{table_name}"
     
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    # TODO: Define your schema / columns below:
-    # name: Mapped[str] = mapped_column(String(255), index=True)
 """
 
-SCHEMA_TEMPLATE = """from zcore import Zchema
+SCHEMA_TEMPLATE = """import uuid
 from pydantic import ConfigDict
-import uuid
+from zcore import Zchema
 
 class {ModelName}Base(Zchema):
     __model__ = "{table_name}"
-    # TODO: Add your shared model attributes
-    pass
 
 class {ModelName}Create({ModelName}Base):
     pass
@@ -157,10 +142,11 @@ class {ModelName}Response({ModelName}Base):
     model_config = ConfigDict(from_attributes=True)
 """
 
-REPOSITORY_TEMPLATE = """from zcore import BaseRepository
-from sqlalchemy.ext.asyncio import AsyncSession
+REPOSITORY_TEMPLATE = """from sqlalchemy.ext.asyncio import AsyncSession
+from zcore import BaseRepository
 
 from .models import {ModelName}
+from .schemas import {ModelName}Create, {ModelName}Update
 
 class {ModelName}Repository(BaseRepository[{ModelName}]):
     def __init__(self, db: AsyncSession):
@@ -179,35 +165,23 @@ class {ModelName}Service(BaseService[{ModelName}]):
 ROUTER_TEMPLATE = """from typing import Any
 from zcore import BaseRouter, RouteKey
 
-from .schemas import {ModelName}Create, {ModelName}Update, {ModelName}Response
-from .services import {ModelName}Service
 from .models import {ModelName}
+from .schemas import {ModelName}Create, {ModelName}Response, {ModelName}Update
+from .services import {ModelName}Service
 
-class {ModelName}Router(BaseRouter[{ModelName}Create, {ModelName}Update]):
+class {ModelName}Router(BaseRouter):
     model = {ModelName}
     create_schema = {ModelName}Create
     update_schema = {ModelName}Update
     schema_out = {ModelName}Response
-    service = {ModelName}Service
+    service = {ModelNameService}
     
     prefix = "/{app_name}"
     tags = ["{ModelName}"]
-    # expose_schemas = True  # Set True to auto-expose JSON Schema on endpoints
 
     def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
-        \"\"\"Retrieve the dependencies list for the router endpoints.
-        
-        By overriding this method, you can dynamically inject custom authentication,
-        authorization, logging, or rate-limiting dependencies for specific route keys.
-        \"\"\"
-        # Example: Add custom dependencies to delete operation, fallback to standard permissions for others
-        if route_key == RouteKey.DELETE:
-            # return [MyCustomAdminPermission()]
-            pass
-            
         return super().get_route_dependencies(route_key, action)
 
-# Export the FastAPI router
 router_instance = {ModelName}Router()
 """
 
@@ -217,36 +191,28 @@ from zcore import Plugin
 class {ModelName}Plugin(Plugin):
     name = "{app_name}"
     version = "0.1.0"
-    dependencies = []  # Add dependent plugin names here (e.g. ['security_plugin'])
+    dependencies = []
 
     def setup(self, app: FastAPI) -> None:
-        # Wire this module's sub-router directly to the central FastAPI app
-        
-        # from .routers import router_instance
-        # app.include_router(router_instance.router)
         pass
 
     async def before_startup(self) -> None:
-        # Executes before any other plugin starts
         pass
 
     async def on_startup(self) -> None:
-        # Standard startup logic (e.g. warming up local caches)
         pass
 
     async def after_startup(self) -> None:
-        # Post-startup cleanups
         pass
 
     async def on_shutdown(self) -> None:
-        # Cleanup tasks for this specific module
         pass
 """
 
-TEST_TEMPLATE = """import pytest
-import uuid
-from zcore.testing import ZTestClient
+TEST_TEMPLATE = """import uuid
+import pytest
 from main import app
+from zcore.testing import ZTestClient
 
 @pytest.mark.asyncio
 async def test_get_{app_name}_list():
