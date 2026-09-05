@@ -31,6 +31,7 @@ class DatabaseSettings(BaseModel):
     execution_options: dict[str, Any] = Field(default_factory=dict)
     extra_engine_kwargs: dict[str, Any] = Field(default_factory=dict)
 
+
 class LoggingSettings(BaseModel):
     """Structured logging configuration schema."""
 
@@ -49,13 +50,14 @@ class LoggingSettings(BaseModel):
     )
     custom_processors: list[Any] = Field(default_factory=list)
 
+
 class Settings(BaseSettings):
     """Core settings and environment variables configuration for the ZCore framework.
 
     This class parses configuration variables from both environment variables and
     optional file-based sources (such as a `.env` file). It manages configuration for
-    the database engine, authentication parameters, file storage paths, timezone policies,
-    and other core services.
+    the database engine, logging subsystems, authentication parameters, file storage paths,
+    timezone policies, and other core services.
 
     Attributes:
         DATABASE: Structured configuration model for database engine settings.
@@ -63,6 +65,8 @@ class Settings(BaseSettings):
         MAX_OVERFLOW: Maximum number of connections allowed beyond the database pool size.
         POOL_SIZE: The connection pool size for database connections.
         DATABASE_TEST_URL: Connection URI for database testing and integration runs.
+        LOGGING: Structured configuration model for framework logging settings.
+        LOG_LEVEL: Fallback environment logging level string.
         TIMEZONE: IANA standard timezone string used across the application.
         AUTO_CONVERT_TIMEZONE: Boolean flag determining automatic API timezone conversions.
         SECRET_KEY: Cryptographic secret key used for signing web tokens and hashes.
@@ -85,6 +89,9 @@ class Settings(BaseSettings):
     POOL_SIZE: int = 5
     DATABASE_TEST_URL: str = "sqlite+aiosqlite:///zcore_test.db"
 
+    LOGGING: LoggingSettings = Field(default_factory=LoggingSettings)
+    LOG_LEVEL: str = "INFO"
+
     TIMEZONE: str = "UTC"
     AUTO_CONVERT_TIMEZONE: bool = True
 
@@ -99,7 +106,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     @model_validator(mode="after")
-    def _sync_database_settings(self) -> "Settings":
+    def _sync_settings(self) -> "Settings":
         if self.DATABASE_URL != "sqlite+aiosqlite:///zcore.db" and self.DATABASE.url == "sqlite+aiosqlite:///zcore.db":
             self.DATABASE.url = self.DATABASE_URL
         elif self.DATABASE.url != "sqlite+aiosqlite:///zcore.db" and self.DATABASE_URL == "sqlite+aiosqlite:///zcore.db":
@@ -108,6 +115,12 @@ class Settings(BaseSettings):
             self.DATABASE.pool_size = self.POOL_SIZE
         if self.MAX_OVERFLOW != 10 and self.DATABASE.max_overflow == 10:
             self.DATABASE.max_overflow = self.MAX_OVERFLOW
+
+        if self.LOG_LEVEL != "INFO" and self.LOGGING.level == "INFO":
+            self.LOGGING.level = self.LOG_LEVEL
+        elif self.LOGGING.level != "INFO" and self.LOG_LEVEL == "INFO":
+            self.LOG_LEVEL = self.LOGGING.level
+
         return self
 
 
