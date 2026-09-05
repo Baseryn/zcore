@@ -1,7 +1,7 @@
 """Web Middleware Implementations.
 
 This module provides ASGI middleware to coordinate request lifecycles. It includes
-`RequestLogMiddleware` to trace execution durations and manage request correlation headers,
+`RequestLogMiddleware` to trace execution durations, status codes, and request correlation headers,
 and `ScopedDependencyMiddleware` to manage the lifecycle of request-scoped dependency injection
 container boundaries.
 """
@@ -28,7 +28,7 @@ class RequestLogMiddleware:
 
     Intercepts HTTP requests, extracts or generates correlation IDs, binds them to
     structured logging contextvars, appends the correlation ID to response headers,
-    and logs request durations.
+    and logs request metrics including method, path, status code, client IP, and duration.
 
     Attributes:
         app: The downstream ASGI application instance.
@@ -59,7 +59,7 @@ class RequestLogMiddleware:
 
         raw_request_id = b""
         for name, value in scope.get("headers", []):
-            if name == b"x-request-id":  # Standard lowercased header in ASGI spec
+            if name == b"x-request-id":
                 raw_request_id = value
                 break
 
@@ -76,34 +76,45 @@ class RequestLogMiddleware:
 
         structlog.contextvars.bind_contextvars(request_id=request_id)
 
+        status_code = 500
+
         async def send_wrapper(message: dict[str, Any]) -> None:
-            """Intercept response start and append the request correlation ID header.
+            """Intercept response start, capture status code, and append correlation header.
 
             Args:
                 message: The outgoing ASGI event dictionary.
             """
+            nonlocal status_code
             if message["type"] == "http.response.start":
+                status_code = message.get("status", 200)
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode()))
                 message["headers"] = headers
             await send(message)
 
         token = ctx.initialize()
+        client = scope.get("client")
+        client_ip = client[0] if client else "unknown"
+
         try:
             await self.app(scope, receive, send_wrapper)
             duration = (time.perf_counter() - s_time) * 1000
             log.info(
-                "http request",
+                "http_request",
                 method=scope.get("method"),
                 path=scope.get("path"),
+                status_code=status_code,
+                client_ip=client_ip,
                 duration_ms=round(duration, 2),
             )
         except Exception:
             duration = (time.perf_counter() - s_time) * 1000
             log.exception(
-                "http request failed",
+                "http_request_failed",
                 method=scope.get("method"),
                 path=scope.get("path"),
+                status_code=status_code,
+                client_ip=client_ip,
                 duration_ms=round(duration, 2),
             )
             raise
@@ -145,13 +156,10 @@ class ScopedDependencyMiddleware:
         scope_id = str(uuid.uuid4())
         token = _current_scope_id.set(scope_id)
 
-        # Capture background tasks context if integrated with FastAPI
-        # We defer scope teardown if there are pending background tasks
         try:
             async with db_manager.session() as session:
                 container.register_scoped_instance(AsyncSession, session)
                 await self.app(scope, receive, send)
         finally:
-            # Safely clear the active IoC scope
             container.clear_scope(scope_id)
             _current_scope_id.reset(token)
