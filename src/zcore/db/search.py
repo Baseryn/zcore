@@ -3,7 +3,7 @@
 This module provides a dynamic query-builder that parses client-supplied filters,
 sorting criteria, and relation-preload requests. Crucially, the system coordinates
 with security context restrictions, intercepting and blocking queries that target
-unauthorized fields or database relations.
+unauthorized fields or database relations, and safely handles type conversions.
 """
 
 from __future__ import annotations
@@ -94,6 +94,7 @@ class SearchEngine:
         model: The root database model bound to this search instance.
         mapper: The SQLAlchemy mapper interface for the model.
         custom_handlers: Custom translation callbacks registered for specific fields.
+        max_depth: Maximum allowable depth for relational query expansions.
     """
 
     def __init__(self, model: type[ModelType]):
@@ -374,16 +375,25 @@ class SearchEngine:
 
         Returns:
             The coerced python value.
+
+        Raises:
+            ValidationError: If type conversion fails due to malformed input values.
         """
         if value is None:
             return value
 
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, (list, tuple, set)):
             return [self._coerce_value(col, v) for v in value]
 
         try:
-            python_type = col.type.python_type
+            python_type = getattr(col.type, "python_type", None)
+        except (NotImplementedError, AttributeError):
+            python_type = None
 
+        if python_type is None:
+            return value
+
+        try:
             if python_type is date and isinstance(value, str):
                 return date.fromisoformat(value.split("T")[0])
 
@@ -396,8 +406,14 @@ class SearchEngine:
             if python_type is bool and isinstance(value, str):
                 return value.lower() in ("true", "1", "yes", "t", "y")
 
-        except (NotImplementedError, AttributeError, ValueError, TypeError):
-            pass
+            if python_type in (int, float) and isinstance(value, str):
+                return python_type(value)
+
+        except (ValueError, TypeError) as e:
+            col_name = getattr(col, "key", str(col))
+            raise ValidationError(
+                message=f"Invalid value '{value}' for column '{col_name}': failed to coerce to {python_type.__name__}."
+            ) from e
 
         return value
 
