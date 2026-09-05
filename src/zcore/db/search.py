@@ -434,7 +434,7 @@ class SearchEngine:
         if op == "is_null":
             return col.is_(None) if value else col.isnot(None)
 
-        if op in ("ilike", "startswith", "endswith"):
+        if op in ("ilike", "startswith", "endswith", "contains"):
             escaped_value = self._escape_like_wildcards(
                 str(value) if value is not None else ""
             )
@@ -447,34 +447,12 @@ class SearchEngine:
 
             target_col = col if is_str else cast(col, String)
 
-            if op == "ilike":
+            if op in ("ilike", "contains"):
                 return target_col.ilike(f"%{escaped_value}%", escape="\\")
             if op == "startswith":
                 return target_col.ilike(f"{escaped_value}%", escape="\\")
             if op == "endswith":
                 return target_col.ilike(f"%{escaped_value}", escape="\\")
-
-        if op == "contains":
-            try:
-                is_str = (
-                    hasattr(col.type, "python_type") and col.type.python_type is str
-                )
-            except (NotImplementedError, AttributeError):
-                is_str = False
-
-            if is_str:
-                escaped_value = self._escape_like_wildcards(
-                    str(value) if value is not None else ""
-                )
-                return col.ilike(f"%{escaped_value}%", escape="\\")
-
-            try:
-                return col.contains(value)
-            except Exception:
-                escaped_value = self._escape_like_wildcards(
-                    str(value) if value is not None else ""
-                )
-                return cast(col, String).ilike(f"%{escaped_value}%", escape="\\")
 
         if op == "between":
             if not isinstance(value, (list, tuple)) or len(value) != 2:

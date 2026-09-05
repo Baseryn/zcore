@@ -340,15 +340,15 @@ def test_search_include_depth_and_relation(
 @pytest.mark.anyio
 async def test_search_lt_le_ge(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
-    
+
     req_lt = SearchRequest(filters=[FilterItem(field="id", op="lt", value=2)])
     res_lt = await db_session.execute(engine.build_base_query(req_lt))
     assert {u.id for u in res_lt.scalars().all()} == {1}
-    
+
     req_le = SearchRequest(filters=[FilterItem(field="id", op="le", value=2)])
     res_le = await db_session.execute(engine.build_base_query(req_le))
     assert {u.id for u in res_le.scalars().all()} == {1, 2}
-    
+
     req_ge = SearchRequest(filters=[FilterItem(field="id", op="ge", value=2)])
     res_ge = await db_session.execute(engine.build_base_query(req_ge))
     assert {u.id for u in res_ge.scalars().all()} == {2, 3}
@@ -365,11 +365,11 @@ async def test_search_in_operator(db_session: Any, seed_data: None) -> None:
 @pytest.mark.anyio
 async def test_search_is_null_operator(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchProfile)
-    
+
     req_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=True)])
     res_null = await db_session.execute(engine.build_base_query(req_null))
     assert {p.id for p in res_null.scalars().all()} == {2}
-    
+
     req_not_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=False)])
     res_not_null = await db_session.execute(engine.build_base_query(req_not_null))
     assert {p.id for p in res_not_null.scalars().all()} == {1, 3}
@@ -389,11 +389,11 @@ async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> Non
     await db_session.flush()
 
     engine = SearchEngine(SearchUser)
-    
+
     req_percent = SearchRequest(filters=[FilterItem(field="username", op="ilike", value="admin%")])
     res_percent = await db_session.execute(engine.build_base_query(req_percent))
     assert {u.id for u in res_percent.scalars().all()} == {1}
-    
+
     req_underscore = SearchRequest(filters=[FilterItem(field="username", op="ilike", value="user_special")])
     res_underscore = await db_session.execute(engine.build_base_query(req_underscore))
     results = list(res_underscore.scalars().all())
@@ -516,3 +516,67 @@ async def test_search_complex_combined_logical_filters(db_session: Any, seed_dat
     req = SearchRequest(filters=[filter_item])
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {1, 3}
+
+
+@pytest.mark.anyio
+async def test_search_type_coercion_set_and_iterables(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+    req_set = SearchRequest(filters=[FilterItem(field="id", op="in", value={1, 2})])
+    res_set = await db_session.execute(engine.build_base_query(req_set))
+    assert {u.id for u in res_set.scalars().all()} == {1, 2}
+
+    req_set_str = SearchRequest(filters=[FilterItem(field="id", op="in", value={"1", "3"})])
+    res_set_str = await db_session.execute(engine.build_base_query(req_set_str))
+    assert {u.id for u in res_set_str.scalars().all()} == {1, 3}
+
+
+@pytest.mark.anyio
+async def test_search_text_operators_on_non_string_columns_cast(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_ilike = SearchRequest(filters=[FilterItem(field="id", op="ilike", value="1")])
+    res_ilike = await db_session.execute(engine.build_base_query(req_ilike))
+    assert {u.id for u in res_ilike.scalars().all()} == {1}
+
+    req_startswith = SearchRequest(filters=[FilterItem(field="uid", op="startswith", value="22222222")])
+    res_startswith = await db_session.execute(engine.build_base_query(req_startswith))
+    assert {u.id for u in res_startswith.scalars().all()} == {2}
+
+    req_endswith = SearchRequest(filters=[FilterItem(field="uid", op="endswith", value="333333333333")])
+    res_endswith = await db_session.execute(engine.build_base_query(req_endswith))
+    assert {u.id for u in res_endswith.scalars().all()} == {3}
+
+    req_contains = SearchRequest(filters=[FilterItem(field="uid", op="contains", value="11111111")])
+    res_contains = await db_session.execute(engine.build_base_query(req_contains))
+    assert {u.id for u in res_contains.scalars().all()} == {1}
+
+
+def test_search_column_without_python_type_fallback() -> None:
+    engine = SearchEngine(SearchUser)
+
+    class CustomNoPythonType:
+        @property
+        def python_type(self) -> Any:
+            raise NotImplementedError
+
+    class MockColumn:
+        key = "unsupported_col"
+        type = CustomNoPythonType()
+
+    mock_col = MockColumn()
+    result = engine._coerce_value(mock_col, "raw_uncoerced_value")
+    assert result == "raw_uncoerced_value"
+
+
+@pytest.mark.anyio
+async def test_search_numeric_coercion_from_string(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchUser)
+
+    req_valid = SearchRequest(filters=[FilterItem(field="id", op="eq", value="2")])
+    res_valid = await db_session.execute(engine.build_base_query(req_valid))
+    assert {u.id for u in res_valid.scalars().all()} == {2}
+
+    with pytest.raises(ValidationError) as exc_info:
+        req_invalid = SearchRequest(filters=[FilterItem(field="id", op="eq", value="not_a_number")])
+        engine.build_base_query(req_invalid)
+    assert "failed to coerce" in str(exc_info.value).lower()
