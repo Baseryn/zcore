@@ -31,9 +31,11 @@ def test_logging_format_by_environment(
     with patch("structlog.configure") as mock_configure:
         logging_config.setup_logging()
         mock_configure.assert_called_once()
-        configured_processors = mock_configure.call_args[1].get("processors", [])
-        assert len(configured_processors) > 0
-        assert isinstance(configured_processors[-1], expected_renderer_cls)
+        root_logger = logging.getLogger()
+        assert len(root_logger.handlers) > 0
+        formatter = root_logger.handlers[0].formatter
+        assert isinstance(formatter.processors[-1], expected_renderer_cls)
+
 
 def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
     loggers = ["uvicorn", "uvicorn.access", "sqlalchemy.engine"]
@@ -54,6 +56,7 @@ def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch
         logger = logging.getLogger(name)
         assert len(logger.handlers) == 0
         assert logger.propagate is True
+
 
 @pytest.mark.parametrize("rich_installed", [True, False])
 def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_installed: bool) -> None:
@@ -85,6 +88,7 @@ def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_insta
     else:
         mock_install.assert_not_called()
 
+
 def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "DEBUG", False)
     
@@ -96,46 +100,49 @@ def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> N
         configured_processors = mock_configure.call_args[1].get("processors", [])
         
         assert structlog.contextvars.merge_contextvars in configured_processors
-        assert structlog.processors.add_log_level in configured_processors
+        assert structlog.stdlib.add_log_level in configured_processors
         assert structlog.processors.format_exc_info in configured_processors
         
         assert any(isinstance(p, structlog.stdlib.PositionalArgumentsFormatter) for p in configured_processors)
         assert any(isinstance(p, structlog.processors.TimeStamper) for p in configured_processors)
 
+
 @pytest.mark.parametrize(
-    "debug_flag, expected_level",
+    "log_level_setting, expected_level",
     [
-        (True, logging.DEBUG),
-        (False, logging.INFO),
+        ("DEBUG", logging.DEBUG),
+        ("INFO", logging.INFO),
+        ("WARNING", logging.WARNING),
     ]
 )
 def test_dynamic_log_level_configuration(
     monkeypatch: pytest.MonkeyPatch,
-    debug_flag: bool,
+    log_level_setting: str,
     expected_level: int
 ) -> None:
-    monkeypatch.setattr(settings, "DEBUG", debug_flag)
+    monkeypatch.setattr(settings, "LOG_LEVEL", log_level_setting)
     
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
     
-    with patch("structlog.configure"), \
-         patch("structlog.make_filtering_bound_logger") as mock_make_filter:
-         
-        logging_config.setup_logging()
-        mock_make_filter.assert_called_once_with(expected_level)
+    with patch("structlog.configure"):
+        logging_config.setup_logging(log_level=log_level_setting)
+        assert logging.getLogger().level == expected_level
+
 
 def test_log_filtering_enforcement_in_action() -> None:
-    filtering_bound_logger_cls = structlog.make_filtering_bound_logger(logging.INFO)
-    mock_underlying = MagicMock()
-    logger = filtering_bound_logger_cls(mock_underlying, [], {})
+    logger = logging.getLogger("test_filter_logger")
+    logger.setLevel(logging.INFO)
+    mock_handler = MagicMock()
+    logger.handlers = [mock_handler]
     
     logger.info("info_msg")
-    assert mock_underlying.info.called
+    assert mock_handler.handle.called
     
-    mock_underlying.reset_mock()
+    mock_handler.reset_mock()
     logger.debug("debug_msg")
-    assert not mock_underlying.debug.called
+    assert not mock_handler.handle.called
+
 
 def test_contextvars_binding_verification() -> None:
     structlog.contextvars.clear_contextvars()
@@ -145,6 +152,7 @@ def test_contextvars_binding_verification() -> None:
     assert event_dict.get("request_id") == "test_req_xyz"
     
     structlog.contextvars.clear_contextvars()
+
 
 def test_factory_and_caching_configurations(monkeypatch: pytest.MonkeyPatch) -> None:
     import zcore.logging.config as logging_config
