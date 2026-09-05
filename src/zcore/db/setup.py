@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
+from zcore.config import settings
 from zcore.kernel.di import container
 from zcore.utils.helpers import json_dumps, json_loads
 
@@ -125,10 +126,22 @@ class DatabaseManager:
         def after_cursor_execute(
             conn, cursor, statement, parameters, context, exec_many
         ):
+            logging_cfg = getattr(settings, "LOGGING", None)
+            if logging_cfg and not getattr(logging_cfg, "log_sql_queries", True):
+                return
+
             start_time = getattr(context, "_query_start_time", None)
             duration_ms = 0.0
             if start_time:
                 duration_ms = (time.perf_counter() - start_time) * 1000
+
+            slow_threshold = (
+                getattr(logging_cfg, "slow_query_threshold_ms", None)
+                if logging_cfg
+                else None
+            )
+            if slow_threshold is not None and duration_ms < slow_threshold:
+                return
 
             compact_statement = " ".join(statement.split())
 
