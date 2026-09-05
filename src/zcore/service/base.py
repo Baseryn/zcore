@@ -176,9 +176,14 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         pass
 
     async def pre_update(
-        self, id: Any, schema: BaseModel, partial: bool
+        self, target: ModelType | Any, schema: BaseModel, partial: bool
     ) -> dict[str, Any] | None:
-        """Hook triggered prior to modifying a single record.
+        """Hook triggered prior to modifying a record.
+
+        Args:
+            target: The model instance or primary key of the record to update.
+            schema: The validated update schema.
+            partial: Boolean indicating whether unset fields are excluded.
 
         Returns:
             An optional dictionary containing values to merge with the update payload.
@@ -189,7 +194,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after modifying a single record."""
         pass
 
-    async def pre_update_multi(self, data: dict[Any, BaseModel], partial: bool) -> None:
+    async def pre_update_multi(
+        self, data: dict[ModelType | Any, BaseModel], partial: bool
+    ) -> None:
         """Hook triggered prior to updating a batch of records."""
         pass
 
