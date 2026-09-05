@@ -297,14 +297,16 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return result
 
     async def update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self,
+        target: ModelType | Any,
+        schema: BaseModel,
+        partial: bool = False,
+        **extra_data: Any,
     ) -> ModelType:
-        """Orchestrate modifications to an existing domain entity.
-
-        Merges pre-update dictionary output with the update payload.
+        """Orchestrate modifications to an existing domain entity or instance.
 
         Args:
-            id: The primary key of the record to update.
+            target: The model instance or primary key of the record to update.
             schema: Validated fields representing the modifications.
             partial: If True, applies changes as a partial patch. Defaults to False.
             **extra_data: Extra fields to append.
@@ -315,9 +317,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         Raises:
             EntityNotFound: If the target entity identifier is not found in the database.
         """
-        hook_data = await self.pre_update(id, schema, partial) or {}
+        hook_data = await self.pre_update(target, schema, partial) or {}
         combined_extra = {**hook_data, **extra_data}
-        result = await self.on_update(id, schema, partial, **combined_extra)
+        result = await self.on_update(target, schema, partial, **combined_extra)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         await self.post_update(result)
@@ -325,7 +327,10 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return result
 
     async def update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self,
+        data: dict[ModelType | Any, BaseModel],
+        partial: bool = False,
+        refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Orchestrate batch modifications to multiple existing domain entities."""
         await self.pre_update_multi(data, partial)
