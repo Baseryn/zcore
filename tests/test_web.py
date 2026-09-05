@@ -1,22 +1,26 @@
 import asyncio
+import datetime
 import inspect
 import uuid
 from contextlib import asynccontextmanager, suppress
 from typing import Any, ClassVar
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
+from sqlalchemy import Column, Integer, Uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from zcore.config import settings
 from zcore.context.context import ZContext
 from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
-from zcore.db.setup import db_manager
+from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
 from zcore.exceptions.handlers import app_exception_handler
 from zcore.kernel.di import _current_scope_id, container
+from zcore.utils.timezone import get_app_timezone
 from zcore.web.api_router import ZCoreRequest
 from zcore.web.base_router import BaseRouter, RouteKey
 from zcore.web.middleware import RequestLogMiddleware, ScopedDependencyMiddleware
@@ -37,11 +41,14 @@ class DummyModel:
         mock_actions.DELETE = "dummy:delete"
         return mock_actions
 
+
 class DummyCreate(BaseModel):
     name: str
 
+
 class DummyUpdate(BaseModel):
     name: str
+
 
 class DummyOut(Zchema):
     __model__ = "dummy"
@@ -49,16 +56,19 @@ class DummyOut(Zchema):
     name: str
     password: str = ""
 
+
 class NestedProfile(Zchema):
     __model__ = "profile"
     phone: str
     city: str
+
 
 class DummyOutWithNested(Zchema):
     __model__ = "dummy"
     id: str
     name: str
     profile: NestedProfile
+
 
 class TargetService:
     def __init__(self, payload: dict[str, Any]) -> None:
@@ -69,6 +79,7 @@ class TargetService:
 
     async def get_list(self, pagination: Any = None) -> list[Any]:
         return []
+
 
 class MockFullService:
     def __init__(self) -> None:
@@ -96,7 +107,8 @@ class MockFullService:
     async def delete(self, id: uuid.UUID) -> None:
         pass
 
-def clean_endpoint_signature(endpoint):
+
+def clean_endpoint_signature(endpoint: Any) -> Any:
     sig = inspect.signature(endpoint)
     parameters = list(sig.parameters.values())
     new_params = [p for p in parameters if p.kind != inspect.Parameter.VAR_KEYWORD]
@@ -114,11 +126,12 @@ def clean_endpoint_signature(endpoint):
     param_line = ", ".join(param_strs)
     call_line = ", ".join(call_strs)
     func_code = f"async def clean_endpoint({param_line}):\n    return await _orig_endpoint({call_line})"
-    local_dict = {}
+    local_dict: dict[str, Any] = {}
     exec(func_code, globals_dict, local_dict)
     clean_func = local_dict["clean_endpoint"]
     clean_func.__annotations__ = endpoint.__annotations__
     return clean_func
+
 
 @pytest.mark.parametrize(
     "router_attrs, expected_error_msg",
@@ -159,6 +172,7 @@ def test_router_auto_scaffolding_validation_errors(router_attrs: dict[str, Any],
         router_cls()
     assert expected_error_msg in str(exc_info.value)
 
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "restricted_fields, payload_in, expected_payload_out, expected_vary",
@@ -185,14 +199,17 @@ async def test_router_schema_projection_pruning(
     expected_vary: list[str]
 ) -> None:
     original_add_api_route = APIRouter.add_api_route
-    def patched_add_api_route(self, path, endpoint, *args, **kwargs):
+
+    def patched_add_api_route(self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any) -> Any:
         clean_endpoint = clean_endpoint_signature(endpoint)
         return original_add_api_route(self, path, clean_endpoint, *args, **kwargs)
+
     monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
     monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset(restricted_fields)))
     app = FastAPI()
     mock_service = TargetService(payload_in)
     container.register_singleton(TargetService, mock_service)
+
     class TargetRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
         create_schema = DummyCreate
@@ -201,8 +218,10 @@ async def test_router_schema_projection_pruning(
         service = TargetService
         prefix = "/items"
         expose_schemas = True
+
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
+
     router_inst = TargetRouter()
     app.include_router(router_inst.router)
     transport = ASGITransport(app=app)
@@ -220,6 +239,7 @@ async def test_router_schema_projection_pruning(
             schema_data = schema_resp.json()
             assert "password" not in schema_data["data"]["properties"]
 
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "custom_request_id, expect_valid_uuid",
@@ -231,9 +251,11 @@ async def test_router_schema_projection_pruning(
 async def test_request_id_middleware(custom_request_id: str | None, expect_valid_uuid: bool) -> None:
     app = FastAPI()
     app.add_middleware(RequestLogMiddleware)
+
     @app.get("/health")
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         headers = {}
@@ -248,15 +270,19 @@ async def test_request_id_middleware(custom_request_id: str | None, expect_valid
         else:
             assert response_id == custom_request_id
 
+
 @pytest.mark.anyio
 async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     original_add_api_route = APIRouter.add_api_route
-    def patched_add_api_route(self, path, endpoint, *args, **kwargs):
+
+    def patched_add_api_route(self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any) -> Any:
         return original_add_api_route(self, path, clean_endpoint_signature(endpoint), *args, **kwargs)
+
     monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
     app = FastAPI()
     service_inst = MockFullService()
     container.register_singleton(MockFullService, service_inst)
+
     class FullCrudRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
         create_schema = DummyCreate
@@ -265,8 +291,10 @@ async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> No
         service = MockFullService
         prefix = "/crud"
         pagination_class = PageNumberPagination
+
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
+
     r = FullCrudRouter()
     app.include_router(r.router)
     transport = ASGITransport(app=app)
@@ -291,13 +319,16 @@ async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> No
         assert res.status_code == 200
         assert res.json()["message"] == "Deleted successfully"
 
+
 @pytest.mark.anyio
 async def test_router_exception_translation_handler() -> None:
     app = FastAPI()
     app.add_exception_handler(AppException, app_exception_handler)
+
     @app.get("/error")
-    async def raise_error():
+    async def raise_error() -> None:
         raise EntityNotFound(message="Missing item", payload={"key": "val"})
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/error")
@@ -306,6 +337,7 @@ async def test_router_exception_translation_handler() -> None:
         assert body["success"] is False
         assert body["message"] == "Missing item"
         assert body["meta"]["error_type"] == "EntityNotFound"
+
 
 @pytest.mark.anyio
 async def test_zchema_recursive_nested_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -316,6 +348,7 @@ async def test_zchema_recursive_nested_pruning(monkeypatch: pytest.MonkeyPatch) 
     assert "phone" not in serialized["profile"]
     assert serialized["profile"]["city"] == "Tehran"
 
+
 @pytest.mark.anyio
 async def test_zchema_wildcard_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
     nested = NestedProfile(phone="12345", city="Tehran")
@@ -324,10 +357,12 @@ async def test_zchema_wildcard_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
     serialized = model.model_dump(mode="json")
     assert serialized == {}
 
+
 @pytest.mark.anyio
 async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.password"})))
     app = FastAPI()
+
     class ExposureRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
         create_schema = DummyCreate
@@ -336,8 +371,10 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         service = MockFullService
         prefix = "/exposure"
         expose_schemas = True
+
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
+
     r = ExposureRouter()
     app.include_router(r.router)
     transport = ASGITransport(app=app)
@@ -348,6 +385,7 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         res_get = await client.get("/exposure/12345678-1234-5678-1234-567812345678?schema=true")
         assert res_get.status_code == 200
         assert "password" not in res_get.json()["data"]["properties"]
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
@@ -362,9 +400,11 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_request_id_validation_pattern(bad_id: str) -> None:
     app = FastAPI()
     app.add_middleware(RequestLogMiddleware)
+
     @app.get("/")
-    def root():
+    def root() -> dict[str, Any]:
         return {}
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/", headers={"x-request-id": bad_id})
@@ -372,20 +412,25 @@ async def test_request_id_validation_pattern(bad_id: str) -> None:
         assert res_id != bad_id
         assert uuid.UUID(res_id)
 
+
 @pytest.mark.anyio
 async def test_scoped_dependency_middleware_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     app.add_middleware(ScopedDependencyMiddleware)
     mock_session = AsyncMock(spec=AsyncSession)
+
     @asynccontextmanager
-    async def mock_sess_manager():
+    async def mock_sess_manager() -> Any:
         yield mock_session
+
     monkeypatch.setattr(db_manager, "session", mock_sess_manager)
+
     @app.get("/scoped")
     async def check_scope() -> dict[str, Any]:
         scope_id = _current_scope_id.get()
         registered_session = container.resolve(AsyncSession)
         return {"scope_id": scope_id, "session_is_mock": registered_session is mock_session}
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/scoped")
@@ -393,24 +438,30 @@ async def test_scoped_dependency_middleware_lifecycle(monkeypatch: pytest.Monkey
         data = res.json()
         assert data["scope_id"] is not None
         assert data["session_is_mock"] is True
+
     assert _current_scope_id.get() is None
     with pytest.raises((TypeError, Exception)):
         container.resolve(AsyncSession)
 
+
 @pytest.mark.anyio
 async def test_zcore_request_body_caching() -> None:
     scope = {"type": "http", "method": "POST", "path": "/"}
+
     async def mock_receive() -> dict[str, Any]:
         return {"type": "http.request", "body": b"test_payload", "more_body": False}
+
     req = ZCoreRequest(scope, mock_receive)
     body1 = await req.body()
     body2 = await req.body()
     assert body1 == b"test_payload"
     assert body2 == b"test_payload"
 
+
 def test_route_sorting_shadowing() -> None:
     class DummyService:
         pass
+
     class SortRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
         create_schema = DummyCreate
@@ -425,6 +476,7 @@ def test_route_sorting_shadowing() -> None:
             RouteKey.PATCH,
             RouteKey.DELETE,
         }
+
     router_inst = SortRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/test/search" in paths
@@ -433,15 +485,18 @@ def test_route_sorting_shadowing() -> None:
     idx_uuid = paths.index("/test/{id:uuid}")
     assert idx_search < idx_uuid
 
+
 @pytest.mark.anyio
 async def test_stream_manager_pubsub_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     redis_mock = AsyncMock()
     pubsub_mock = AsyncMock()
     redis_mock.pubsub = MagicMock(return_value=pubsub_mock)
-    async def mock_listen():
+
+    async def mock_listen() -> Any:
         while True:
             await asyncio.sleep(3600)
             yield {"type": "pmessage", "channel": "stream:user:123", "data": "{}"}
+
     pubsub_mock.listen = mock_listen
     init_stream_redis(redis_mock)
     sm = StreamManager()
@@ -462,3 +517,149 @@ async def test_stream_manager_pubsub_lifecycle(monkeypatch: pytest.MonkeyPatch) 
     await sm.unsubscribe(u_id, queue)
     assert sm._pubsub_task is None
     init_stream_redis(None)
+
+
+def test_base_router_pk_type_auto_detection_int_and_uuid() -> None:
+    class IntModel(Base):
+        __tablename__ = f"int_model_{uuid.uuid4().hex[:6]}"
+        id = Column(Integer, primary_key=True)
+
+    class UuidModel(Base):
+        __tablename__ = f"uuid_model_{uuid.uuid4().hex[:6]}"
+        id = Column(Uuid, primary_key=True)
+
+    class DummyService:
+        pass
+
+    class IntRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = IntModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/int-items"
+
+    class UuidRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = UuidModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/uuid-items"
+
+    int_r = IntRouter()
+    int_paths = [r.path for r in int_r.router.routes]
+    assert "/int-items/{id:int}" in int_paths
+
+    uuid_r = UuidRouter()
+    uuid_paths = [r.path for r in uuid_r.router.routes]
+    assert "/uuid-items/{id:uuid}" in uuid_paths
+
+
+def test_base_router_explicit_pk_type_override() -> None:
+    class DummyService:
+        pass
+
+    class CustomPkRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        pk_type = int
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/custom-pk"
+
+    r = CustomPkRouter()
+    paths = [route.path for route in r.router.routes]
+    assert "/custom-pk/{id:int}" in paths
+
+
+def test_base_router_weighted_route_specificity_sorting() -> None:
+    class DummyService:
+        pass
+
+    class SpecificityRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/api/items"
+
+    router_inst = SpecificityRouter()
+    paths = [r.path for r in router_inst.router.routes]
+    assert "/api/items/search" in paths
+    assert "/api/items/{id:uuid}" in paths
+
+    idx_search = paths.index("/api/items/search")
+    idx_dynamic = paths.index("/api/items/{id:uuid}")
+    assert idx_search < idx_dynamic
+
+
+def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
+    tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
+    monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
+    get_app_timezone.cache_clear()
+    monkeypatch.setattr(settings, "TIMEZONE", "Asia/Tehran")
+    monkeypatch.setattr(settings, "AUTO_CONVERT_TIMEZONE", True)
+
+    class ItemDetail(Zchema):
+        __model__ = "item"
+        title: str
+        timestamp: datetime.datetime
+
+    class OrderSummary(Zchema):
+        __model__ = "order"
+        order_id: str
+        created_at: datetime.datetime
+        items: list[ItemDetail]
+
+    dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
+    order = OrderSummary(
+        order_id="ORD-100",
+        created_at=dt,
+        items=[ItemDetail(title="Widget", timestamp=dt)],
+    )
+
+    serialized = order.model_dump()
+    assert serialized["created_at"] == "2026-07-02T13:30:00+03:30"
+    assert serialized["items"][0]["timestamp"] == "2026-07-02T13:30:00+03:30"
+    get_app_timezone.cache_clear()
+
+
+def test_zchema_input_validation_preserves_raw_types() -> None:
+    class InputPayload(Zchema):
+        __model__ = "input_test"
+        name: str
+        event_time: datetime.datetime
+
+    dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
+    data = {"name": "test_input", "event_time": dt}
+
+    validated = InputPayload.model_validate(data)
+    assert isinstance(validated.event_time, datetime.datetime)
+    assert validated.event_time == dt
+
+
+@pytest.mark.anyio
+async def test_request_log_middleware_captures_status_and_client_ip() -> None:
+    app = FastAPI()
+    app.add_middleware(RequestLogMiddleware)
+
+    @app.get("/status-test")
+    def get_status() -> dict[str, str]:
+        return {"status": "ok"}
+
+    with patch("zcore.web.middleware.log.info") as mock_log_info:
+        transport = ASGITransport(app=app, client=("192.168.1.50", 54321))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/status-test")
+            assert res.status_code == 200
+
+        mock_log_info.assert_called_once()
+        log_kwargs = mock_log_info.call_args[1]
+        assert log_kwargs["status_code"] == 200
+        assert log_kwargs["client_ip"] == "192.168.1.50"
+        assert log_kwargs["path"] == "/status-test"
+        assert log_kwargs["method"] == "GET"
+        assert "duration_ms" in log_kwargs
