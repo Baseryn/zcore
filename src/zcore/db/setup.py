@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from zcore.kernel.di import container
+from zcore.utils.helpers import json_dumps, json_loads
 
 
 @dataclass(frozen=True)
@@ -160,7 +161,7 @@ class DatabaseManager:
 
         Configures parameters for SQLite and server-based relational engines
         (such as PostgreSQL or MySQL), supporting structured settings, custom
-        connect_args, and execution_options.
+        connect_args, execution_options, and JSON serializers.
 
         Args:
             db_url: The primary database connection URL. Defaults to None.
@@ -221,6 +222,8 @@ class DatabaseManager:
 
         final_engine_kwargs: dict[str, Any] = {
             "echo": False,
+            "json_serializer": json_dumps,
+            "json_deserializer": json_loads,
             "pool_pre_ping": target_pool_pre_ping,
             **extra_kwargs,
         }
