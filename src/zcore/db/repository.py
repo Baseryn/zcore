@@ -362,7 +362,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
-        """Delete multiple records matching the provided list of primary keys.
+        """Delete multiple records matching the provided list of primary keys with dialect-aware fallback.
 
         Args:
             ids: A list of primary key values of records to delete.
@@ -373,10 +373,21 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
-        result = await self.db.scalars(stmt)
-        await self.db.flush()
-        return list(result.all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "delete_returning", False))
+
+        if supports_returning:
+            stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+            result = await self.db.scalars(stmt)
+            await self.db.flush()
+            return list(result.all())
+        else:
+            records = list(await self.get_by_ids(ids=ids))
+            if records:
+                stmt = delete(self.model).where(self.pk.in_(ids))
+                await self.db.execute(stmt)
+                await self.db.flush()
+            return records
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
