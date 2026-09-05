@@ -284,12 +284,12 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return records
 
     async def update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self, target: ModelType | Any, schema: BaseModel, partial: bool = False, **extra_data: Any,
     ) -> ModelType | None:
-        """Update an existing database record with dynamic fields.
+        """Update an existing database record from a model instance or primary key.
 
         Args:
-            id: The primary key identifier of the record to update.
+            target: The model instance or primary key identifier of the record to update.
             schema: The Pydantic update schema containing modified parameters.
             partial: If True, applies modifications as a partial patch (ignoring unset fields).
                 If False, updates the record using all fields. Defaults to False.
@@ -298,9 +298,13 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         Returns:
             The updated and refreshed database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         update_data = schema.model_dump(exclude_unset=partial)
         update_data.update(extra_data)
         for field, value in update_data.items():
