@@ -22,6 +22,7 @@ class SearchUser(Base):
     is_active = Column(Boolean)
     uid = Column(Uuid)
 
+
 class SearchProfile(Base):
     __tablename__ = f"search_profiles_{uuid_pkg.uuid4().hex[:6]}"
     id = Column(Integer, primary_key=True)
@@ -30,12 +31,14 @@ class SearchProfile(Base):
     user = relationship("SearchUser")
     posts = relationship("SearchPost", back_populates="profile")
 
+
 class SearchPost(Base):
     __tablename__ = f"search_posts_{uuid_pkg.uuid4().hex[:6]}"
     id = Column(Integer, primary_key=True)
     profile_id = Column(Integer, ForeignKey(f"{SearchProfile.__tablename__}.id"))
     title = Column(String)
     profile = relationship("SearchProfile", back_populates="posts")
+
 
 class SearchComment(Base):
     __tablename__ = f"search_comments_{uuid_pkg.uuid4().hex[:6]}"
@@ -44,11 +47,13 @@ class SearchComment(Base):
     body = Column(String)
     post = relationship("SearchPost")
 
+
 class CustomDepthEntity(Base):
     __tablename__ = f"custom_depth_{uuid_pkg.uuid4().hex[:6]}"
     __max_search_depth__ = 5
     id = Column(Integer, primary_key=True)
     username = Column(String)
+
 
 @pytest.fixture(autouse=True)
 def mock_restricted_fields() -> Generator[None, None, None]:
@@ -57,6 +62,7 @@ def mock_restricted_fields() -> Generator[None, None, None]:
     yield
     ctx.restricted_fields = None
 
+
 @pytest_asyncio.fixture(autouse=True)
 async def setup_search_tables(test_engine: Any) -> AsyncGenerator[None, None]:
     async with test_engine.begin() as conn:
@@ -64,6 +70,7 @@ async def setup_search_tables(test_engine: Any) -> AsyncGenerator[None, None]:
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
 
 @pytest_asyncio.fixture
 async def seed_data(db_session: Any) -> None:
@@ -107,6 +114,7 @@ async def seed_data(db_session: Any) -> None:
 
     await db_session.flush()
 
+
 @pytest.mark.parametrize(
     "op, val, expected_ids",
     [
@@ -134,6 +142,7 @@ async def test_search_all_operators(
     assert len(items) == len(expected_ids)
     assert {item.id for item in items} == set(expected_ids)
 
+
 @pytest.mark.anyio
 async def test_search_startswith_operator(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
@@ -149,6 +158,7 @@ async def test_search_startswith_operator(db_session: Any, seed_data: None) -> N
     req_none = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="nonexistent")])
     res_none = await db_session.execute(engine.build_base_query(req_none))
     assert len(res_none.scalars().all()) == 0
+
 
 @pytest.mark.anyio
 async def test_search_endswith_operator(db_session: Any, seed_data: None) -> None:
@@ -166,6 +176,7 @@ async def test_search_endswith_operator(db_session: Any, seed_data: None) -> Non
     res_st = await db_session.execute(engine.build_base_query(req_st))
     assert {u.id for u in res_st.scalars().all()} == {3}
 
+
 @pytest.mark.anyio
 async def test_search_contains_operator(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
@@ -182,6 +193,7 @@ async def test_search_contains_operator(db_session: Any, seed_data: None) -> Non
     res_ues = await db_session.execute(engine.build_base_query(req_ues))
     assert {u.id for u in res_ues.scalars().all()} == {3}
 
+
 @pytest.mark.anyio
 async def test_search_between_operator_numbers(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
@@ -193,6 +205,7 @@ async def test_search_between_operator_numbers(db_session: Any, seed_data: None)
     req_2_3 = SearchRequest(filters=[FilterItem(field="id", op="between", value=[2, 3])])
     res_2_3 = await db_session.execute(engine.build_base_query(req_2_3))
     assert {u.id for u in res_2_3.scalars().all()} == {2, 3}
+
 
 @pytest.mark.anyio
 async def test_search_between_operator_datetime(db_session: Any, seed_data: None) -> None:
@@ -210,6 +223,7 @@ async def test_search_between_operator_datetime(db_session: Any, seed_data: None
     res_dt = await db_session.execute(engine.build_base_query(req_dt))
     assert {u.id for u in res_dt.scalars().all()} == {1, 2}
 
+
 @pytest.mark.parametrize(
     "invalid_val",
     [
@@ -224,12 +238,14 @@ def test_search_between_validation_error(invalid_val: Any) -> None:
     req = SearchRequest(filters=[FilterItem(field="id", op="between", value=invalid_val)])
     with pytest.raises(ValidationError) as exc_info:
         engine.build_base_query(req)
-    assert "expects a list of 2 elements" in str(exc_info.value)
+    assert "requires a list of exactly 2 items" in str(exc_info.value)
+
 
 def make_nested_filter(depth: int, field_name: str = "username") -> FilterItem:
     if depth <= 1:
         return FilterItem(field=field_name, op="eq", value="guest")
     return FilterItem(op="and", items=[make_nested_filter(depth - 1, field_name)])
+
 
 @pytest.mark.parametrize(
     "depth, should_raise",
@@ -252,6 +268,7 @@ def test_search_max_filter_depth_default(depth: int, should_raise: bool) -> None
         query = engine.build_base_query(request)
         assert query is not None
 
+
 @pytest.mark.parametrize(
     "depth, should_raise",
     [
@@ -273,6 +290,7 @@ def test_search_custom_model_max_depth(depth: int, should_raise: bool) -> None:
         query = engine.build_base_query(request)
         assert query is not None
 
+
 @pytest.mark.parametrize(
     "field_variant",
     [
@@ -291,6 +309,7 @@ def test_search_restricted_field_bypass(field_variant: str) -> None:
     with pytest.raises(ForbiddenError) as exc_info:
         engine.build_base_query(sort_req)
     assert "restricted" in str(exc_info.value).lower()
+
 
 @pytest.mark.parametrize(
     "paths, expected_error, error_message",
@@ -317,6 +336,7 @@ def test_search_include_depth_and_relation(
         query = engine.build_base_query(request)
         assert query is not None
 
+
 @pytest.mark.anyio
 async def test_search_lt_le_ge(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
@@ -333,12 +353,14 @@ async def test_search_lt_le_ge(db_session: Any, seed_data: None) -> None:
     res_ge = await db_session.execute(engine.build_base_query(req_ge))
     assert {u.id for u in res_ge.scalars().all()} == {2, 3}
 
+
 @pytest.mark.anyio
 async def test_search_in_operator(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
     req = SearchRequest(filters=[FilterItem(field="id", op="in", value=[1, 3])])
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {1, 3}
+
 
 @pytest.mark.anyio
 async def test_search_is_null_operator(db_session: Any, seed_data: None) -> None:
@@ -351,6 +373,7 @@ async def test_search_is_null_operator(db_session: Any, seed_data: None) -> None
     req_not_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=False)])
     res_not_null = await db_session.execute(engine.build_base_query(req_not_null))
     assert {p.id for p in res_not_null.scalars().all()} == {1, 3}
+
 
 @pytest.mark.anyio
 async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> None:
@@ -376,12 +399,14 @@ async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> Non
     results = list(res_underscore.scalars().all())
     assert {u.id for u in results} == {2}
 
+
 @pytest.mark.anyio
 async def test_search_type_coercion_date_time(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
     req = SearchRequest(filters=[FilterItem(field="created_at", op="eq", value="2026-01-02T12:00:00")])
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {2}
+
 
 @pytest.mark.anyio
 async def test_search_type_coercion_uuid(db_session: Any, seed_data: None) -> None:
@@ -390,12 +415,14 @@ async def test_search_type_coercion_uuid(db_session: Any, seed_data: None) -> No
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {3}
 
+
 @pytest.mark.anyio
 async def test_search_type_coercion_bool(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
     req_true = SearchRequest(filters=[FilterItem(field="is_active", op="eq", value="true")])
     res_true = await db_session.execute(engine.build_base_query(req_true))
     assert {u.id for u in res_true.scalars().all()} == {1, 3}
+
 
 @pytest.mark.anyio
 async def test_search_relation_one_to_one(db_session: Any, seed_data: None) -> None:
@@ -404,12 +431,14 @@ async def test_search_relation_one_to_one(db_session: Any, seed_data: None) -> N
     res = await db_session.execute(engine.build_base_query(req))
     assert {p.id for p in res.scalars().all()} == {3}
 
+
 @pytest.mark.anyio
 async def test_search_relation_one_to_many_any(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchProfile)
     req = SearchRequest(filters=[FilterItem(field="posts.title", op="eq", value="Hello guest")])
     res = await db_session.execute(engine.build_base_query(req))
     assert {p.id for p in res.scalars().all()} == {3}
+
 
 @pytest.mark.anyio
 async def test_search_custom_handler(db_session: Any, seed_data: None) -> None:
@@ -418,6 +447,7 @@ async def test_search_custom_handler(db_session: Any, seed_data: None) -> None:
     req = SearchRequest(filters=[FilterItem(field="username", op="eq", value="anything")])
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {3}
+
 
 def test_search_nested_restricted_field() -> None:
     from zcore.context.context import ctx
@@ -428,6 +458,7 @@ def test_search_nested_restricted_field() -> None:
         engine.build_base_query(req)
     assert "restricted" in str(exc_info.value).lower()
 
+
 def test_search_restricted_relationship_path() -> None:
     from zcore.context.context import ctx
     ctx.restricted_fields = {"SearchComment.post", "post"}
@@ -437,12 +468,14 @@ def test_search_restricted_relationship_path() -> None:
         engine.build_base_query(req)
     assert "restricted" in str(exc_info.value).lower()
 
+
 def test_search_invalid_sort_fields() -> None:
     engine = SearchEngine(SearchUser)
     req = SearchRequest(sort=[SortItem(field="non_existent_field", order="asc")])
     with pytest.raises(ValidationError) as exc_info:
         engine.build_base_query(req)
     assert "invalid sort field" in str(exc_info.value).lower()
+
 
 @pytest.mark.anyio
 async def test_search_pagination_build_query(db_session: Any, seed_data: None) -> None:
@@ -453,6 +486,7 @@ async def test_search_pagination_build_query(db_session: Any, seed_data: None) -
     items = list(res.scalars().all())
     assert len(items) == 1
 
+
 @pytest.mark.anyio
 async def test_search_empty_request(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
@@ -461,6 +495,7 @@ async def test_search_empty_request(db_session: Any, seed_data: None) -> None:
     res = await db_session.execute(query)
     items = list(res.scalars().all())
     assert len(items) == 3
+
 
 @pytest.mark.anyio
 async def test_search_complex_combined_logical_filters(db_session: Any, seed_data: None) -> None:
