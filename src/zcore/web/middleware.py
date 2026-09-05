@@ -3,7 +3,7 @@
 This module provides ASGI middleware to coordinate request lifecycles. It includes
 `RequestLogMiddleware` to trace execution durations, status codes, and request correlation headers,
 and `ScopedDependencyMiddleware` to manage the lifecycle of request-scoped dependency injection
-container boundaries.
+container boundaries and asynchronous database sessions.
 """
 
 import re
@@ -126,8 +126,8 @@ class ScopedDependencyMiddleware:
     """ASGI middleware to isolate request-scoped dependencies.
 
     Initializes a new context scope key on incoming requests, binds it to the DI
-    context variables, and executes a cleanup sweep of the scope's registered instances
-    upon connection closure.
+    context variables, allocates an active database session for the request lifecycle,
+    and executes a cleanup sweep of the scope's registered instances upon connection closure.
 
     Attributes:
         app: The downstream ASGI application instance.
