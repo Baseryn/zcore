@@ -229,7 +229,7 @@ The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered
 ```text
 $ zc
 
-⚡ ZCore Framework v0.1.0-Beta • Modern Modular Monolith
+⚡ ZCore Framework v0.1.0-beta.9 • Modern Modular Monolith
  FastAPI • SQLAlchemy 2.0 • Pydantic V2
 
 ? What framework task would you like to perform? 📦 init — Scaffold a new full ZCore project
