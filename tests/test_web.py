@@ -597,6 +597,8 @@ def test_base_router_weighted_route_specificity_sorting() -> None:
 
 
 def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zcore.utils.timezone import ZDateTime
+
     tehran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30), name="Asia/Tehran")
     monkeypatch.setattr("zoneinfo.ZoneInfo", lambda name: tehran_tz)
     get_app_timezone.cache_clear()
@@ -606,12 +608,12 @@ def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch
     class ItemDetail(Zchema):
         __model__ = "item"
         title: str
-        timestamp: datetime.datetime
+        timestamp: ZDateTime
 
     class OrderSummary(Zchema):
         __model__ = "order"
         order_id: str
-        created_at: datetime.datetime
+        created_at: ZDateTime
         items: list[ItemDetail]
 
     dt = datetime.datetime(2026, 7, 2, 10, 0, 0)
@@ -621,7 +623,7 @@ def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch
         items=[ItemDetail(title="Widget", timestamp=dt)],
     )
 
-    serialized = order.model_dump()
+    serialized = order.model_dump(mode="json")
     assert serialized["created_at"] == "2026-07-02T13:30:00+03:30"
     assert serialized["items"][0]["timestamp"] == "2026-07-02T13:30:00+03:30"
     get_app_timezone.cache_clear()

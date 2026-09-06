@@ -90,6 +90,10 @@ def format_iso_with_app_timezone(dt: datetime | None) -> str | None:
     """
     if dt is None:
         return None
+
+    if not getattr(settings, "AUTO_CONVERT_TIMEZONE", True):
+        return dt.isoformat()
+
     converted = to_app_timezone(dt)
     return converted.isoformat() if converted is not None else None
 
