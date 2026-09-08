@@ -50,43 +50,64 @@ class LocalStorageProvider(StorageProvider):
         self.validators = validators or []
         self.base_path.mkdir(parents=True, exist_ok=True)
 
-    def _resolve_path(self, file_path_or_url: str) -> StdPath | None:
-        """Resolve a physical filesystem path from a web URL or file path within sandbox boundaries.
+    def _extract_key(self, file_path_or_url: str) -> str | None:
+        """Extract the normalized storage key from a web URL, storage key, or filesystem path.
 
         Args:
-            file_path_or_url: Web URL or relative/absolute path to resolve.
+            file_path_or_url: Web URL, storage key, or filesystem path.
+
+        Returns:
+            Normalized POSIX storage key, or None if an explicit path attempts sandbox traversal.
+        """
+        cleaned = file_path_or_url.replace("\\", "/").strip()
+
+        if self.url_prefix and cleaned.startswith(self.url_prefix):
+            return cleaned[len(self.url_prefix) :].lstrip("/")
+
+        try:
+            cand = StdPath(cleaned).resolve()
+            if cand.is_relative_to(self.base_path):
+                return cand.relative_to(self.base_path).as_posix()
+            if StdPath(cleaned).is_absolute() or cleaned.startswith(("./", "../")):
+                return None
+        except Exception:
+            pass
+
+        return cleaned.lstrip("/")
+
+    def _key_to_path(self, key: str | None) -> StdPath | None:
+        """Safely resolve a storage key to an absolute filesystem path within sandbox boundaries.
+
+        Args:
+            key: Normalized storage key.
 
         Returns:
             Resolved absolute StdPath if within base_path boundaries, or None if outside.
         """
-        if not file_path_or_url:
+        if not key:
             return None
 
-        cleaned_str = file_path_or_url.replace("\\", "/").strip()
-        candidate = StdPath(cleaned_str)
-
         try:
-            if candidate.is_absolute():
-                resolved = candidate.resolve()
-                if resolved.is_relative_to(self.base_path):
-                    return resolved
-
-            direct_resolved = (StdPath.cwd() / candidate).resolve()
-            if direct_resolved.is_relative_to(self.base_path):
-                return direct_resolved
-
-            if self.url_prefix and cleaned_str.startswith(self.url_prefix):
-                cleaned_str = cleaned_str[len(self.url_prefix) :].lstrip("/")
-            elif cleaned_str.startswith("/"):
-                cleaned_str = cleaned_str.lstrip("/")
-
-            target_file = (self.base_path / cleaned_str).resolve()
-            if target_file.is_relative_to(self.base_path):
-                return target_file
-
+            resolved = (self.base_path / key).resolve()
+            if resolved.is_relative_to(self.base_path) and resolved != self.base_path:
+                return resolved
             return None
         except Exception:
             return None
+
+    def _resolve_path(self, file_path_or_url: str) -> StdPath | None:
+        """Resolve any incoming URL, storage key, or path to a validated filesystem path.
+
+        Args:
+            file_path_or_url: Web URL, storage key, or relative/absolute path.
+
+        Returns:
+            Resolved absolute StdPath if valid and within boundaries, or None otherwise.
+        """
+        if not file_path_or_url:
+            return None
+        key = self._extract_key(file_path_or_url)
+        return self._key_to_path(key)
 
     async def _resolve_destination(self, filename: str, folder: str = "") -> tuple[StdPath, str]:
         """Generate verified physical filesystem target paths and corresponding web URL representations.
@@ -102,19 +123,16 @@ class LocalStorageProvider(StorageProvider):
             AppException: If a directory traversal attempt is detected.
         """
         normalized_folder = folder.strip("/\\").replace("\\", "/")
-        target_dir = (self.base_path / normalized_folder).resolve()
-
-        if not target_dir.is_relative_to(self.base_path):
-            raise AppException("Path traversal attempt detected")
-
-        await Path(str(target_dir)).mkdir(parents=True, exist_ok=True)
-
         ext = StdPath(filename).suffix.lower()
         secure_filename = f"{uuid.uuid4().hex}{ext}"
+        storage_key = f"{normalized_folder}/{secure_filename}" if normalized_folder else secure_filename
 
-        physical_path = target_dir / secure_filename
-        relative_web_path = f"{normalized_folder}/{secure_filename}" if normalized_folder else secure_filename
-        web_url = f"{self.url_prefix}/{relative_web_path}" if self.url_prefix else f"/{relative_web_path}"
+        physical_path = self._key_to_path(storage_key)
+        if physical_path is None:
+            raise AppException("Path traversal attempt detected")
+
+        await Path(str(physical_path.parent)).mkdir(parents=True, exist_ok=True)
+        web_url = f"{self.url_prefix}/{storage_key}" if self.url_prefix else f"/{storage_key}"
 
         return physical_path, web_url
 
@@ -189,7 +207,7 @@ class LocalStorageProvider(StorageProvider):
             file_path_or_url: Stored web URL or relative path of the file to remove.
 
         Returns:
-            True if unlinking succeeds, False if traversal is detected or target is absent.
+            True if unlinking succeeds, False if traversal is detected or deletion fails.
         """
         if not file_path_or_url:
             return False
@@ -243,14 +261,12 @@ class LocalStorageProvider(StorageProvider):
         if not file_path_or_url:
             return ""
 
-        cleaned_path = file_path_or_url.replace("\\", "/").strip()
-        if self.url_prefix and cleaned_path.startswith(self.url_prefix):
-            return cleaned_path
+        cleaned = file_path_or_url.replace("\\", "/").strip()
+        if self.url_prefix and cleaned.startswith(self.url_prefix):
+            return cleaned
 
-        target_file = self._resolve_path(file_path_or_url)
-        if target_file is not None and target_file.is_relative_to(self.base_path):
-            relative_part = target_file.relative_to(self.base_path).as_posix()
-            return f"{self.url_prefix}/{relative_part}" if self.url_prefix else f"/{relative_part}"
+        key = self._extract_key(file_path_or_url)
+        if not key:
+            return ""
 
-        trimmed = cleaned_path.lstrip("/")
-        return f"{self.url_prefix}/{trimmed}" if self.url_prefix else f"/{trimmed}"
+        return f"{self.url_prefix}/{key}" if self.url_prefix else f"/{key}"
