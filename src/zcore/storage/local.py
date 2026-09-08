@@ -194,26 +194,17 @@ class LocalStorageProvider(StorageProvider):
         if not file_path_or_url:
             return False
 
-        try:
-            cleaned_path = file_path_or_url.replace("\\", "/").strip()
-            if self.url_prefix and cleaned_path.startswith(self.url_prefix):
-                cleaned_path = cleaned_path[len(self.url_prefix):].lstrip("/")
-            elif cleaned_path.startswith("/"):
-                cleaned_path = cleaned_path.lstrip("/")
-
-            target_file = (self.base_path / cleaned_path).resolve()
-
-            if not target_file.is_relative_to(self.base_path):
-                logger.warning(
-                    f"Prevented arbitrary file deletion attempt outside base path: {file_path_or_url}"
-                )
-                return False
-
-            path_obj = Path(str(target_file))
-            if await path_obj.exists():
-                await path_obj.unlink()
-                return True
+        target_file = self._resolve_path(file_path_or_url)
+        if target_file is None:
+            logger.warning(
+                f"Prevented arbitrary file deletion attempt outside base path: {file_path_or_url}"
+            )
             return False
+
+        try:
+            path_obj = Path(str(target_file))
+            await path_obj.unlink(missing_ok=True)
+            return True
         except Exception as e:
             logger.error(f"Failed to delete file '{file_path_or_url}': {e}")
             return False
