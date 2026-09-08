@@ -246,6 +246,11 @@ class LocalStorageProvider(StorageProvider):
         cleaned_path = file_path_or_url.replace("\\", "/").strip()
         if self.url_prefix and cleaned_path.startswith(self.url_prefix):
             return cleaned_path
-        
+
+        target_file = self._resolve_path(file_path_or_url)
+        if target_file is not None and target_file.is_relative_to(self.base_path):
+            relative_part = target_file.relative_to(self.base_path).as_posix()
+            return f"{self.url_prefix}/{relative_part}" if self.url_prefix else f"/{relative_part}"
+
         trimmed = cleaned_path.lstrip("/")
         return f"{self.url_prefix}/{trimmed}" if self.url_prefix else f"/{trimmed}"
