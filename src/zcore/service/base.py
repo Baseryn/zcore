@@ -132,15 +132,26 @@ class ReadServiceMixin(AbstractService[ModelType]):
 
     async def get_list(
         self,
+        *criterion: Any,
         pagination: Any = None,
         fields: list[Any] | None = None,
         options: list[ExecutableOption] | None = None,
-        *criterion: Any,
         **filters: Any,
     ) -> Any:
-        """Fetch a paginated or complete listing of entities, applying post-retrieval hooks."""
+        """Fetch a paginated or complete listing of entities, applying post-retrieval hooks.
+
+        Args:
+            *criterion: Positional binary SQLAlchemy filter expressions.
+            pagination: Pagination parameters. Defaults to None.
+            fields: Selective list of model fields to return. Defaults to None.
+            options: Additional execution options. Defaults to None.
+            **filters: Dynamic keyword filters.
+
+        Returns:
+            A list of matching records, or a paginated response container.
+        """
         result = await self.repository.get_list(
-            pagination, fields, options, *criterion, **filters
+            *criterion, pagination=pagination, fields=fields, options=options, **filters
         )
         if pagination is None:
             return await self.post_get_multi(result)
