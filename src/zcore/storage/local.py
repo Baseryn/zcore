@@ -221,18 +221,11 @@ class LocalStorageProvider(StorageProvider):
         if not file_path_or_url:
             return False
 
+        target_file = self._resolve_path(file_path_or_url)
+        if target_file is None:
+            return False
+
         try:
-            cleaned_path = file_path_or_url.replace("\\", "/").strip()
-            if self.url_prefix and cleaned_path.startswith(self.url_prefix):
-                cleaned_path = cleaned_path[len(self.url_prefix):].lstrip("/")
-            elif cleaned_path.startswith("/"):
-                cleaned_path = cleaned_path.lstrip("/")
-
-            target_file = (self.base_path / cleaned_path).resolve()
-
-            if not target_file.is_relative_to(self.base_path):
-                return False
-
             path_obj = Path(str(target_file))
             return await path_obj.exists()
         except Exception:
