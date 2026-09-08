@@ -50,6 +50,44 @@ class LocalStorageProvider(StorageProvider):
         self.validators = validators or []
         self.base_path.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_path(self, file_path_or_url: str) -> StdPath | None:
+        """Resolve a physical filesystem path from a web URL or file path within sandbox boundaries.
+
+        Args:
+            file_path_or_url: Web URL or relative/absolute path to resolve.
+
+        Returns:
+            Resolved absolute StdPath if within base_path boundaries, or None if outside.
+        """
+        if not file_path_or_url:
+            return None
+
+        cleaned_str = file_path_or_url.replace("\\", "/").strip()
+        candidate = StdPath(cleaned_str)
+
+        try:
+            if candidate.is_absolute():
+                resolved = candidate.resolve()
+                if resolved.is_relative_to(self.base_path):
+                    return resolved
+
+            direct_resolved = (StdPath.cwd() / candidate).resolve()
+            if direct_resolved.is_relative_to(self.base_path):
+                return direct_resolved
+
+            if self.url_prefix and cleaned_str.startswith(self.url_prefix):
+                cleaned_str = cleaned_str[len(self.url_prefix) :].lstrip("/")
+            elif cleaned_str.startswith("/"):
+                cleaned_str = cleaned_str.lstrip("/")
+
+            target_file = (self.base_path / cleaned_str).resolve()
+            if target_file.is_relative_to(self.base_path):
+                return target_file
+
+            return None
+        except Exception:
+            return None
+
     async def _resolve_destination(self, filename: str, folder: str = "") -> tuple[StdPath, str]:
         """Generate verified physical filesystem target paths and corresponding web URL representations.
 
