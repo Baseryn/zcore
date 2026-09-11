@@ -3,7 +3,7 @@
 This module provides a dynamic query-builder that parses client-supplied filters,
 sorting criteria, and relation-preload requests. Crucially, the system coordinates
 with security context restrictions, intercepting and blocking queries that target
-unauthorized fields or database relations.
+unauthorized fields or database relations, and safely handles type conversions.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from datetime import date, datetime
 from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, asc, desc, inspect, or_, select
+from sqlalchemy import String, and_, asc, cast, desc, inspect, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
@@ -94,6 +94,7 @@ class SearchEngine:
         model: The root database model bound to this search instance.
         mapper: The SQLAlchemy mapper interface for the model.
         custom_handlers: Custom translation callbacks registered for specific fields.
+        max_depth: Maximum allowable depth for relational query expansions.
     """
 
     def __init__(self, model: type[ModelType]):
@@ -374,16 +375,25 @@ class SearchEngine:
 
         Returns:
             The coerced python value.
+
+        Raises:
+            ValidationError: If type conversion fails due to malformed input values.
         """
         if value is None:
             return value
 
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, (list, tuple, set)):
             return [self._coerce_value(col, v) for v in value]
 
         try:
-            python_type = col.type.python_type
+            python_type = getattr(col.type, "python_type", None)
+        except (NotImplementedError, AttributeError):
+            python_type = None
 
+        if python_type is None:
+            return value
+
+        try:
             if python_type is date and isinstance(value, str):
                 return date.fromisoformat(value.split("T")[0])
 
@@ -396,49 +406,91 @@ class SearchEngine:
             if python_type is bool and isinstance(value, str):
                 return value.lower() in ("true", "1", "yes", "t", "y")
 
-        except (NotImplementedError, AttributeError, ValueError, TypeError):
-            pass
+            if python_type in (int, float) and isinstance(value, str):
+                return python_type(value)
+
+        except (ValueError, TypeError) as e:
+            col_name = getattr(col, "key", str(col))
+            raise ValidationError(
+                message=f"Invalid value '{value}' for column '{col_name}': failed to coerce to {python_type.__name__}."
+            ) from e
 
         return value
 
     def _compare_column(self, col: Any, op: str, value: Any) -> Any:
-        """Build database comparison clauses matching standard filter operators.
+        """Build database comparison clauses matching standard filter operators with type safety.
 
         Args:
             col: The active comparison column.
             op: The filter comparison operator string.
-            value: The coerced parameter value.
+            value: The parameter value.
 
         Returns:
             The generated comparison clause, or None if unsupported.
+
+        Raises:
+            ValidationError: If operator constraints or value structures are violated.
         """
         if op == "is_null":
             return col.is_(None) if value else col.isnot(None)
 
-        if op == "ilike":
-            escaped_value = self._escape_like_wildcards(value)
-            return col.ilike(f"%{escaped_value}%", escape="\\")
+        if op in ("ilike", "startswith", "endswith"):
+            escaped_value = self._escape_like_wildcards(
+                str(value) if value is not None else ""
+            )
+            try:
+                is_str = (
+                    hasattr(col.type, "python_type") and col.type.python_type is str
+                )
+            except (NotImplementedError, AttributeError):
+                is_str = False
 
-        if op == "startswith":
-            escaped_value = self._escape_like_wildcards(value)
-            return col.ilike(f"{escaped_value}%", escape="\\")
-        
-        if op == "endswith":
-            escaped_value = self._escape_like_wildcards(value)
-            return col.ilike(f"%{escaped_value}", escape="\\")
-        
+            target_col = col if is_str else cast(col, String)
+
+            if op == "ilike":
+                return target_col.ilike(f"%{escaped_value}%", escape="\\")
+            if op == "startswith":
+                return target_col.ilike(f"{escaped_value}%", escape="\\")
+            if op == "endswith":
+                return target_col.ilike(f"%{escaped_value}", escape="\\")
+
         if op == "contains":
-            if hasattr(col.type, "python_type") and col.type.python_type is str:
-                escaped_value = self._escape_like_wildcards(value)
+            try:
+                is_str = (
+                    hasattr(col.type, "python_type") and col.type.python_type is str
+                )
+            except (NotImplementedError, AttributeError):
+                is_str = False
+
+            if is_str:
+                escaped_value = self._escape_like_wildcards(
+                    str(value) if value is not None else ""
+                )
                 return col.ilike(f"%{escaped_value}%", escape="\\")
-            return col.contains(value)
+
+            try:
+                return col.contains(value)
+            except Exception:
+                escaped_value = self._escape_like_wildcards(
+                    str(value) if value is not None else ""
+                )
+                return cast(col, String).ilike(f"%{escaped_value}%", escape="\\")
 
         if op == "between":
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                raise ValidationError(message=f"Operator 'between' expects a list of 2 elements, got {value}")
+                col_name = getattr(col, "key", str(col))
+                raise ValidationError(
+                    message=f"Operator 'between' requires a list of exactly 2 items for column '{col_name}', received: {value}"
+                )
             lower = self._coerce_value(col, value[0])
             upper = self._coerce_value(col, value[1])
             return col.between(lower, upper)
+
+        if op == "in":
+            if not isinstance(value, (list, tuple, set)):
+                value = [value]
+            coerced_list = [self._coerce_value(col, v) for v in value]
+            return col.in_(coerced_list)
 
         coerced_value = self._coerce_value(col, value)
 
@@ -454,13 +506,6 @@ class SearchEngine:
             return col >= coerced_value
         if op == "le":
             return col <= coerced_value
-
-        if op == "in":
-            return col.in_(
-                coerced_value
-                if isinstance(coerced_value, (list, tuple))
-                else [coerced_value]
-            )
 
         return None
 
