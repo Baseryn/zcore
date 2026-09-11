@@ -1,3 +1,5 @@
+"""ZCore Command Line Interface Entrypoint."""
+
 import argparse
 import shutil
 import sys
@@ -38,6 +40,7 @@ LAYER_CHOICES = [
 
 
 def resolve_target_project(subprojects: list[str], prompt_msg: str) -> Path | None:
+    """Prompt user to select a target project from detected workspace projects."""
     print_step_header(prompt_msg)
     chosen = questionary.select(
         "Select target project:",
@@ -48,6 +51,7 @@ def resolve_target_project(subprojects: list[str], prompt_msg: str) -> Path | No
 
 
 def prompt_init_interactive(project_name: str | None = None, db_driver: str | None = None) -> None:
+    """Prompt user interactively to scaffold a new ZCore project."""
     print_step_header("Initialize New ZCore Project")
 
     if not project_name:
@@ -99,6 +103,7 @@ def prompt_init_interactive(project_name: str | None = None, db_driver: str | No
 
 
 def prompt_startapp_interactive(app_name: str | None = None, target_dir: Path | None = None) -> None:
+    """Prompt user interactively to scaffold a domain application module."""
     print_step_header("Scaffold ZCore Domain App")
 
     if not app_name:
@@ -148,6 +153,7 @@ def prompt_startapp_interactive(app_name: str | None = None, target_dir: Path | 
 
 
 def interactive_dashboard() -> None:
+    """Display interactive CLI dashboard for workspace management."""
     print_banner()
 
     is_inside = is_zcore_project()
@@ -212,6 +218,7 @@ def interactive_dashboard() -> None:
 
 
 def main() -> None:
+    """Parse arguments and execute CLI commands."""
     try:
         parser = argparse.ArgumentParser(description="ZCore CLI Tool", prog="zc")
         parser.add_argument("--version", action="store_true", help="Show the active ZCore Framework version")
@@ -239,7 +246,7 @@ def main() -> None:
         args = parser.parse_args()
 
         if args.version:
-            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-Beta[/bold white]")
+            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-beta.9[/bold white]")
             sys.exit(0)
 
         if args.command == "init":
