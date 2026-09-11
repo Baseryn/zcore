@@ -284,12 +284,12 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return records
 
     async def update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self, target: ModelType | Any, schema: BaseModel, partial: bool = False, **extra_data: Any,
     ) -> ModelType | None:
-        """Update an existing database record with dynamic fields.
+        """Update an existing database record from a model instance or primary key.
 
         Args:
-            id: The primary key identifier of the record to update.
+            target: The model instance or primary key identifier of the record to update.
             schema: The Pydantic update schema containing modified parameters.
             partial: If True, applies modifications as a partial patch (ignoring unset fields).
                 If False, updates the record using all fields. Defaults to False.
@@ -298,9 +298,13 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         Returns:
             The updated and refreshed database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         update_data = schema.model_dump(exclude_unset=partial)
         update_data.update(extra_data)
         for field, value in update_data.items():
@@ -310,15 +314,12 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self, data: dict[ModelType | Any, BaseModel], partial: bool = False, refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Bulk update multiple database records using DBAPI executemany.
 
-        Executes the updates without hydrating ORM entities beforehand, then fetches
-        and returns the updated model instances in a single batch query.
-
         Args:
-            data: A mapping of primary keys to their update schemas.
+            data: A mapping of model instances or primary keys to their update schemas.
             partial: If True, ignores unset schema fields. Defaults to False.
             refresh: Parameter maintained for interface consistency. Defaults to False.
 
@@ -328,13 +329,17 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not data:
             return []
 
-        payloads = [
-            {
-                **schema.model_dump(exclude_unset=partial),
-                self.pk_name: pk_val,
-            }
-            for pk_val, schema in data.items()
-        ]
+        payloads = []
+        target_ids = []
+        for key, schema in data.items():
+            pk_val = getattr(key, self.pk_name, key)
+            target_ids.append(pk_val)
+            payloads.append(
+                {
+                    **schema.model_dump(exclude_unset=partial),
+                    self.pk_name: pk_val,
+                }
+            )
 
         await self.db.execute(
             update(self.model),
@@ -342,20 +347,24 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         )
         await self.db.flush()
 
-        return await self.get_by_ids(ids=list(data.keys()))
+        return await self.get_by_ids(ids=target_ids)
 
-    async def delete(self, id: Any) -> ModelType | None:
-        """Delete a single record by its primary key identifier.
+    async def delete(self, target: ModelType | Any) -> ModelType | None:
+        """Delete a single record by its model instance or primary key identifier.
 
         Args:
-            id: The primary key value of the target record to delete.
+            target: The model instance or primary key value of the target record to delete.
 
         Returns:
             The deleted database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         await self.db.delete(record)
         await self.db.flush()
         return record

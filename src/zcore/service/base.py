@@ -176,9 +176,14 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         pass
 
     async def pre_update(
-        self, id: Any, schema: BaseModel, partial: bool
+        self, target: ModelType | Any, schema: BaseModel, partial: bool
     ) -> dict[str, Any] | None:
-        """Hook triggered prior to modifying a single record.
+        """Hook triggered prior to modifying a record.
+
+        Args:
+            target: The model instance or primary key of the record to update.
+            schema: The validated update schema.
+            partial: Boolean indicating whether unset fields are excluded.
 
         Returns:
             An optional dictionary containing values to merge with the update payload.
@@ -189,7 +194,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after modifying a single record."""
         pass
 
-    async def pre_update_multi(self, data: dict[Any, BaseModel], partial: bool) -> None:
+    async def pre_update_multi(
+        self, data: dict[ModelType | Any, BaseModel], partial: bool
+    ) -> None:
         """Hook triggered prior to updating a batch of records."""
         pass
 
@@ -234,20 +241,27 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return await self.repository.create_multi(schemas, refresh=refresh)
 
     async def on_update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self,
+        target: ModelType | Any,
+        schema: BaseModel,
+        partial: bool = False,
+        **extra_data: Any,
     ) -> ModelType | None:
         """Execute core single-record update in database."""
-        return await self.repository.update(id, schema, partial, **extra_data)
+        return await self.repository.update(target, schema, partial, **extra_data)
 
     async def on_update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self,
+        data: dict[ModelType | Any, BaseModel],
+        partial: bool = False,
+        refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
 
-    async def on_delete(self, id: Any) -> ModelType | None:
+    async def on_delete(self, target: ModelType | Any) -> ModelType | None:
         """Execute core single-record deletion in database."""
-        return await self.repository.delete(id)
+        return await self.repository.delete(target)
 
     async def on_delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
         """Execute core batch-record deletions in database."""
@@ -283,14 +297,16 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return result
 
     async def update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self,
+        target: ModelType | Any,
+        schema: BaseModel,
+        partial: bool = False,
+        **extra_data: Any,
     ) -> ModelType:
-        """Orchestrate modifications to an existing domain entity.
-
-        Merges pre-update dictionary output with the update payload.
+        """Orchestrate modifications to an existing domain entity or instance.
 
         Args:
-            id: The primary key of the record to update.
+            target: The model instance or primary key of the record to update.
             schema: Validated fields representing the modifications.
             partial: If True, applies changes as a partial patch. Defaults to False.
             **extra_data: Extra fields to append.
@@ -301,9 +317,9 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         Raises:
             EntityNotFound: If the target entity identifier is not found in the database.
         """
-        hook_data = await self.pre_update(id, schema, partial) or {}
+        hook_data = await self.pre_update(target, schema, partial) or {}
         combined_extra = {**hook_data, **extra_data}
-        result = await self.on_update(id, schema, partial, **combined_extra)
+        result = await self.on_update(target, schema, partial, **combined_extra)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         await self.post_update(result)
@@ -311,7 +327,10 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         return result
 
     async def update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self,
+        data: dict[ModelType | Any, BaseModel],
+        partial: bool = False,
+        refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Orchestrate batch modifications to multiple existing domain entities."""
         await self.pre_update_multi(data, partial)
@@ -320,10 +339,20 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def delete(self, id: Any) -> ModelType:
-        """Orchestrate the deletion and cleanup of a single domain entity."""
-        await self.pre_delete(id)
-        result = await self.on_delete(id)
+    async def delete(self, target: ModelType | Any) -> ModelType:
+        """Orchestrate the deletion and cleanup of a single domain entity.
+
+        Args:
+            target: The model instance or primary key value of the target record to delete.
+
+        Returns:
+            The deleted database model instance.
+
+        Raises:
+            EntityNotFound: If the target entity identifier is not found in the database.
+        """
+        await self.pre_delete(target)
+        result = await self.on_delete(target)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         await self.post_delete(result)
