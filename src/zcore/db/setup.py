@@ -107,7 +107,11 @@ class DatabaseManager:
         self._session_factory: async_sessionmaker[AsyncSession] | None = None
 
     def _register_query_logger(self, sync_engine: Engine) -> None:
-        """Register events on connection cursors to intercept, sanitize, and log query statistics."""
+        """Register events on connection cursors to intercept, sanitize, and log query statistics.
+
+        Args:
+            sync_engine: The synchronous core SQLAlchemy Engine instance.
+        """
         dialect_name = sync_engine.dialect.name
         db_logger = structlog.get_logger(f"zcore.db.{dialect_name}")
 

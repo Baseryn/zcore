@@ -37,7 +37,8 @@ class Settings(BaseSettings):
 
     This class parses configuration variables from both environment variables and
     optional file-based sources (such as a `.env` file). It manages configuration for
-    the database engine, authentication parameters, file storage paths, and other core services.
+    the database engine, authentication parameters, file storage paths, timezone policies,
+    and other core services.
 
     Attributes:
         DATABASE: Structured configuration model for database engine settings.
@@ -45,6 +46,8 @@ class Settings(BaseSettings):
         MAX_OVERFLOW: Maximum number of connections allowed beyond the database pool size.
         POOL_SIZE: The connection pool size for database connections.
         DATABASE_TEST_URL: Connection URI for database testing and integration runs.
+        TIMEZONE: IANA standard timezone string used across the application.
+        AUTO_CONVERT_TIMEZONE: Boolean flag determining automatic API timezone conversions.
         SECRET_KEY: Cryptographic secret key used for signing web tokens and hashes.
         PROJECT_NAME: Name of the project.
         ALGORITHM: Cryptographic algorithm utilized for signing JWTs.
@@ -64,6 +67,9 @@ class Settings(BaseSettings):
     MAX_OVERFLOW: int = 10
     POOL_SIZE: int = 5
     DATABASE_TEST_URL: str = "sqlite+aiosqlite:///zcore_test.db"
+
+    TIMEZONE: str = "UTC"
+    AUTO_CONVERT_TIMEZONE: bool = True
 
     SECRET_KEY: str = "zcore-insecure-fallback-secret-key-must-be-changed"
     PROJECT_NAME: str = "ZCore Application"
