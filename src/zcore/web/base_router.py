@@ -3,7 +3,7 @@
 This module provides the generic `BaseRouter` interface, which scaffolds
 standard security-aware CRUD endpoints (POST, GET, GET_ALL, SEARCH, UPDATE, PATCH, DELETE)
 and integrates them with services, schemas, dependency requirements, and pagination handlers,
-with clean declarative syntax and zero-configuration primary key auto-detection.
+with clean declarative syntax, primary key auto-detection, and weighted route specificity sorting.
 """
 
 import uuid
@@ -48,7 +48,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     """Declarative web router orchestrator.
 
     Automatically maps CRUD operations to matching database model dependencies and handles
-    dependency injections, schema validations, and dynamic primary key route resolution.
+    dependency injections, schema validations, dynamic primary key route resolution,
+    and hierarchical route ordering based on path specificity.
 
     Attributes:
         model: The database declarative model class.
@@ -261,8 +262,27 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         return self._normalize_dependencies(dependencies)
 
     def _sort_routes(self) -> None:
-        """Sort routes to place parameterized dynamic paths at the end of the routing table."""
-        self.router.routes.sort(key=lambda r: "{" in r.path)
+        """Sort routes using hierarchical specificity scoring to avoid path shadowing."""
+
+        def _route_specificity_key(route: Any) -> tuple[int, int, list[int], int]:
+            path = getattr(route, "path", "")
+            segments = [seg for seg in path.strip("/").split("/") if seg]
+
+            segment_scores: list[int] = []
+            for seg in segments:
+                if seg.startswith("{") and seg.endswith("}"):
+                    if ":path}" in seg:
+                        segment_scores.append(2)
+                    else:
+                        segment_scores.append(1)
+                else:
+                    segment_scores.append(0)
+
+            has_dynamic = 1 if any(s > 0 for s in segment_scores) else 0
+            total_dynamic = sum(segment_scores)
+            return (has_dynamic, total_dynamic, segment_scores, -len(segments))
+
+        self.router.routes.sort(key=_route_specificity_key)
 
     def _register_routes(self) -> None:
         """Dynamically generate and bind endpoints to the APIRouter."""
