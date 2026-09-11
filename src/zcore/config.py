@@ -10,11 +10,26 @@ across the application lifecycle.
 import os
 from typing import Any, TypeVar, cast
 
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from zcore.kernel.di import container
 
 T = TypeVar("T", bound="Settings")
+
+
+class DatabaseSettings(BaseModel):
+    """Database connection and engine configuration schema."""
+
+    url: str = "sqlite+aiosqlite:///zcore.db"
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_recycle: int = 1800
+    pool_pre_ping: bool = True
+    echo: bool = False
+    connect_args: dict[str, Any] = Field(default_factory=dict)
+    execution_options: dict[str, Any] = Field(default_factory=dict)
+    extra_engine_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class Settings(BaseSettings):
@@ -25,6 +40,7 @@ class Settings(BaseSettings):
     the database engine, authentication parameters, file storage paths, and other core services.
 
     Attributes:
+        DATABASE: Structured configuration model for database engine settings.
         DATABASE_URL: Connection URI for the primary relational database.
         MAX_OVERFLOW: Maximum number of connections allowed beyond the database pool size.
         POOL_SIZE: The connection pool size for database connections.
@@ -43,6 +59,7 @@ class Settings(BaseSettings):
         env_file=os.getenv("ENV_FILE", ".env"), extra="ignore", case_sensitive=True
     )
 
+    DATABASE: DatabaseSettings = Field(default_factory=DatabaseSettings)
     DATABASE_URL: str = "sqlite+aiosqlite:///zcore.db"
     MAX_OVERFLOW: int = 10
     POOL_SIZE: int = 5
@@ -57,6 +74,18 @@ class Settings(BaseSettings):
     STORAGE_PATH: str = "./storage"
     REDIS_URL: str | None = None
     DEBUG: bool = True
+
+    @model_validator(mode="after")
+    def _sync_database_settings(self) -> "Settings":
+        if self.DATABASE_URL != "sqlite+aiosqlite:///zcore.db" and self.DATABASE.url == "sqlite+aiosqlite:///zcore.db":
+            self.DATABASE.url = self.DATABASE_URL
+        elif self.DATABASE.url != "sqlite+aiosqlite:///zcore.db" and self.DATABASE_URL == "sqlite+aiosqlite:///zcore.db":
+            self.DATABASE_URL = self.DATABASE.url
+        if self.POOL_SIZE != 5 and self.DATABASE.pool_size == 5:
+            self.DATABASE.pool_size = self.POOL_SIZE
+        if self.MAX_OVERFLOW != 10 and self.DATABASE.max_overflow == 10:
+            self.DATABASE.max_overflow = self.MAX_OVERFLOW
+        return self
 
 
 def initialize_settings(settings_inst: Settings) -> None:
