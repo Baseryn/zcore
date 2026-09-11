@@ -174,7 +174,7 @@ class {ModelName}Router(BaseRouter):
     create_schema = {ModelName}Create
     update_schema = {ModelName}Update
     schema_out = {ModelName}Response
-    service = {ModelNameService}
+    service = {ModelName}Service
     
     prefix = "/{app_name}"
     tags = ["{ModelName}"]

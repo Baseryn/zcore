@@ -8,25 +8,22 @@ with clean declarative syntax, primary key auto-detection, and weighted route sp
 
 import uuid
 from enum import StrEnum
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from fastapi import APIRouter, Depends, status
 from fastapi.params import Depends as DependsClass
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
-from zcore.db.pagination import (
-    BasePagination,
-    CursorParams,
-    PageNumberParams,
-    PaginatedResult,
-)
 from zcore.db.search import SearchRequest
 from zcore.kernel.di import Injector
 from zcore.security.permissions import HasScopes
 from zcore.service.base import BaseService
 from zcore.web.api_router import ZCoreAPIRoute
 from zcore.web.response import ResponseWrapper
+
+if TYPE_CHECKING:
+    from zcore.db.pagination import BasePagination
 
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
 UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
@@ -76,7 +73,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     prefix: str = ""
     tags: list[str] | None = None
     exclude: set[RouteKey] | None = None
-    pagination_class: type[BasePagination] | None = None
+    pagination_class: type["BasePagination"] | None = None
     route_class: type[APIRoute] = ZCoreAPIRoute
 
     expose_schemas: set[RouteKey] | bool = False
@@ -487,6 +484,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             The list of resolved model records wrapped in a ResponseWrapper.
         """
         result = await service.get_list(pagination)
+        from zcore.db.pagination import PaginatedResult
+
         if isinstance(result, PaginatedResult):
             return ResponseWrapper(data=result.data, meta=result.meta)
         return ResponseWrapper(data=result)
@@ -505,12 +504,16 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         """
         pagination = None
         if self.pagination_class:
+            from zcore.db.pagination import CursorParams, PageNumberParams
+
             if self.pagination_class.params_class == CursorParams:
                 pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
             else:
                 pagination = PageNumberParams(page=search_in.page, size=search_in.size)
 
         result = await service.search(search_in, pagination)
+        from zcore.db.pagination import PaginatedResult
+
         if isinstance(result, PaginatedResult):
             return ResponseWrapper(data=result.data, meta=result.meta)
         return ResponseWrapper(data=result)

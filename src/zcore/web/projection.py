@@ -1,18 +1,15 @@
 """Unified Schema and Response Pruning Hub.
 
 This module provides the core `Zchema` base class, which integrates Pydantic V2
-dynamic JSON schema generation, input validation, automatic timezone conversions,
-and response serialization filtering based on domain-isolated context restriction definitions.
+dynamic JSON schema generation, input validation, and response serialization
+filtering based on domain-isolated context restriction definitions.
 """
 
-from datetime import datetime
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, model_serializer, model_validator
 
-from zcore.config import settings
 from zcore.context.context import ctx
-from zcore.utils.timezone import format_iso_with_app_timezone
 
 
 class Zchema(BaseModel):
@@ -20,7 +17,7 @@ class Zchema(BaseModel):
 
     Subclasses specify their unique database domain mapping via the `__model__`
     class attribute. This enables contextual, recursive pruning across schema generation,
-    input validation, automated timezone formatting, and response serialization.
+    input validation, and response serialization.
     """
 
     __model__: ClassVar[str | None] = None
@@ -60,9 +57,8 @@ class Zchema(BaseModel):
         cls,
         data: Any,
         relative_paths: set[str],
-        auto_convert_tz: bool = False,
     ) -> Any:
-        """Recursively strip restricted attributes and format datetimes with app timezone."""
+        """Recursively strip restricted attributes from dictionary representations."""
         if not isinstance(data, dict):
             return data
 
@@ -83,32 +79,22 @@ class Zchema(BaseModel):
 
         for key in list(data.keys()):
             val = data[key]
-            if auto_convert_tz and isinstance(val, datetime):
-                data[key] = format_iso_with_app_timezone(val)
-            elif key in nested_restrictions:
+            if key in nested_restrictions:
                 rem_paths = nested_restrictions[key]
                 if isinstance(val, dict):
-                    data[key] = cls._prune_data(
-                        val, rem_paths, auto_convert_tz=auto_convert_tz
-                    )
+                    data[key] = cls._prune_data(val, rem_paths)
                 elif isinstance(val, list):
                     data[key] = [
-                        cls._prune_data(
-                            item, rem_paths, auto_convert_tz=auto_convert_tz
-                        )
+                        cls._prune_data(item, rem_paths)
                         if isinstance(item, dict)
                         else item
                         for item in val
                     ]
             elif isinstance(val, dict):
-                data[key] = cls._prune_data(
-                    val, set(), auto_convert_tz=auto_convert_tz
-                )
+                data[key] = cls._prune_data(val, set())
             elif isinstance(val, list):
                 data[key] = [
-                    cls._prune_data(
-                        item, set(), auto_convert_tz=auto_convert_tz
-                    )
+                    cls._prune_data(item, set())
                     if isinstance(item, dict)
                     else item
                     for item in val
@@ -167,21 +153,18 @@ class Zchema(BaseModel):
 
         if isinstance(data, dict):
             data_copy = dict(data)
-            return cls._prune_data(data_copy, relative_paths, auto_convert_tz=False)
+            return cls._prune_data(data_copy, relative_paths)
         return data
 
     @model_serializer(mode="wrap")
     def secure_serializer(self, handler: Any) -> Any:
-        """Securely intercept serialization to prune restricted attributes and format timezones."""
+        """Securely intercept serialization to prune restricted attributes."""
         serialized = handler(self)
         relative_paths = self._get_relative_restricted_paths()
-        auto_convert_tz = getattr(settings, "AUTO_CONVERT_TIMEZONE", True)
         if serialized is None:
             return serialized
 
-        if isinstance(serialized, dict):
+        if isinstance(serialized, dict) and relative_paths:
             serialized_copy = dict(serialized)
-            return self._prune_data(
-                serialized_copy, relative_paths, auto_convert_tz=auto_convert_tz
-            )
+            return self._prune_data(serialized_copy, relative_paths)
         return serialized

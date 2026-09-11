@@ -17,11 +17,13 @@ from zcore.exceptions.base import (
     ValidationError,
 )
 from zcore.exceptions.handlers import app_exception_handler
+from zcore.utils.timezone import format_iso_with_app_timezone
 from zcore.web.response import ResponseWrapper
 
 
 class CustomPaymentFailed(AppException):
     status_code = 402
+
 
 @pytest.mark.parametrize(
     "exc_class, status_code, message, payload",
@@ -44,6 +46,7 @@ def test_exception_status_codes(
     assert exc.status_code == status_code
     assert exc.message == message
     assert exc.payload == payload
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
@@ -79,6 +82,7 @@ async def test_app_exception_handler_middleware(
         assert body["meta"]["error_type"] == exc_to_raise.__class__.__name__
         assert body["meta"]["payload"] == expected_meta_payload
 
+
 @pytest.mark.anyio
 async def test_exception_logging_integration() -> None:
     app = FastAPI()
@@ -102,6 +106,7 @@ async def test_exception_logging_integration() -> None:
                 method="GET"
             )
 
+
 @pytest.mark.anyio
 async def test_custom_app_exception_subclass() -> None:
     app = FastAPI()
@@ -120,6 +125,7 @@ async def test_custom_app_exception_subclass() -> None:
         assert body["message"] == "Payment declined"
         assert body["meta"]["error_type"] == "CustomPaymentFailed"
         assert body["meta"]["payload"] == {"reason": "insufficient_funds"}
+
 
 @pytest.mark.anyio
 async def test_complex_payload_serialization() -> None:
@@ -140,8 +146,9 @@ async def test_complex_payload_serialization() -> None:
         assert response.status_code == 400
         body = response.json()
         assert body["meta"]["payload"]["uuid"] == str(uid)
-        assert body["meta"]["payload"]["time"] == now.isoformat()
+        assert body["meta"]["payload"]["time"] == format_iso_with_app_timezone(now)
         assert body["meta"]["payload"]["decimal"] == "123.45"
+
 
 @pytest.mark.anyio
 async def test_boundary_null_values() -> None:
@@ -160,6 +167,7 @@ async def test_boundary_null_values() -> None:
         assert body["success"] is False
         assert body["message"] == ""
         assert body["meta"]["payload"] is None
+
 
 @pytest.mark.anyio
 async def test_strict_response_wrapper_compliance() -> None:

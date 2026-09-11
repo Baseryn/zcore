@@ -7,6 +7,7 @@ import pytest
 
 from zcore.cli import main
 from zcore.cli.commands import find_zcore_projects, is_zcore_project
+from zcore.cli.ui import console, print_banner
 
 
 @pytest.fixture
@@ -266,3 +267,32 @@ def test_scaffolded_templates_are_valid_python(
         code = py_file.read_text(encoding="utf-8")
         if code.strip():
             compile(code, str(py_file), "exec")
+
+
+def test_cli_version_output_beta_9() -> None:
+    with console.capture() as capture:
+        test_args = ["zc", "--version"]
+        with patch.object(sys, "argv", test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+    assert "0.1.0-beta.9" in capture.get()
+
+    with console.capture() as capture:
+        print_banner()
+    assert "0.1.0-beta.9" in capture.get()
+
+
+def test_cli_scaffold_templates_use_database_settings_config(run_in_tmp_path: Path) -> None:
+    project_name = "db_cfg_proj"
+    test_args = ["zc", "init", project_name, "-y"]
+
+    with patch.object(sys, "argv", test_args):
+        main()
+
+    project_dir = run_in_tmp_path / project_name
+    main_py_content = (project_dir / "main.py").read_text(encoding="utf-8")
+    env_content = (project_dir / ".env").read_text(encoding="utf-8")
+
+    assert "db_manager.init_app(config=settings.DATABASE)" in main_py_content
+    assert 'TIMEZONE="UTC"' in env_content

@@ -1,34 +1,42 @@
 """ZCore Dynamic Timezone and DateTime Management Module.
 
 This module provides timezone-aware datetime utilities leveraging Python's
-standard `zoneinfo.ZoneInfo` (IANA database). It coordinates application-level
-timezone conversions, timezone-aware current time generation, and automated
-ISO 8601 formatting with offsets.
+standard `zoneinfo.ZoneInfo` (IANA database) with built-in fallback to `datetime.timezone.utc`.
 """
 
 import functools
 import zoneinfo
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
+import structlog
 from pydantic import PlainSerializer
 
 from zcore.config import settings
 
+logger = structlog.get_logger()
+
 
 @functools.lru_cache(maxsize=16)
-def get_app_timezone() -> zoneinfo.ZoneInfo:
+def get_app_timezone() -> Any:
     """Retrieve and cache the active application ZoneInfo object based on settings.
 
     Returns:
-        A ZoneInfo instance representing the application's configured timezone,
+        A timezone instance representing the application's configured timezone,
         falling back to UTC if the configured identifier is invalid.
     """
     tz_name = getattr(settings, "TIMEZONE", "UTC")
+    if not tz_name or str(tz_name).upper() == "UTC":
+        return UTC
     try:
         return zoneinfo.ZoneInfo(tz_name)
-    except Exception:
-        return zoneinfo.ZoneInfo("UTC")
+    except Exception as e:
+        logger.warning(
+            "Invalid timezone configured, falling back to UTC",
+            timezone=tz_name,
+            error=str(e),
+        )
+        return UTC
 
 
 def now() -> datetime:
@@ -82,6 +90,10 @@ def format_iso_with_app_timezone(dt: datetime | None) -> str | None:
     """
     if dt is None:
         return None
+
+    if not getattr(settings, "AUTO_CONVERT_TIMEZONE", True):
+        return dt.isoformat()
+
     converted = to_app_timezone(dt)
     return converted.isoformat() if converted is not None else None
 
