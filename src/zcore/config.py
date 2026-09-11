@@ -10,7 +10,7 @@ across the application lifecycle.
 import os
 from typing import Any, TypeVar, cast
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from zcore.kernel.di import container
@@ -75,6 +75,7 @@ class Settings(BaseSettings):
         ACCESS_TOKEN_EXPIRE_MINUTES: Expiry duration for authentication access tokens in minutes.
         REFRESH_TOKEN_EXPIRE_DAYS: Expiry duration for refresh tokens in days.
         STORAGE_PATH: Local filesystem base path reserved for target storage uploads.
+        STORAGE_URL_PREFIX: HTTP URL prefix mapped to exposed static assets.
         REDIS_URL: Redis connection URI, or None if Redis is not used.
         DEBUG: Boolean flag indicating whether the application is in debug mode.
     """
@@ -101,7 +102,14 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    STORAGE_PATH: str = "./storage"
+    STORAGE_PATH: str = Field(
+        default="./storage",
+        validation_alias=AliasChoices("STORAGE_PATH", "STORAGE_BASE_PATH"),
+    )
+    STORAGE_URL_PREFIX: str = Field(
+        default="/storage",
+        validation_alias=AliasChoices("STORAGE_URL_PREFIX", "STORAGE_PREFIX"),
+    )
     REDIS_URL: str | None = None
     DEBUG: bool = True
 
@@ -133,11 +141,6 @@ class Settings(BaseSettings):
 def initialize_settings(settings_inst: Settings) -> None:
     """Register the settings instance in the IoC dependency injection container.
 
-    This function binds the instantiated settings class to the DI container. If the
-    provided instance is a subclass of Settings, it registers both the specific
-    subclass and the base Settings type, allowing downstream components to
-    inject the base class or the custom subclass seamlessly.
-
     Args:
         settings_inst: An instance of `Settings` (or its subclasses)
             to register into the global container.
@@ -149,9 +152,6 @@ def initialize_settings(settings_inst: Settings) -> None:
 
 def get_settings(settings_class: type[T] = Settings) -> T:
     """Retrieve the settings instance from the dependency injection container.
-
-    If the specified settings class has not yet been registered in the DI container,
-    this function instantiates it, registers it as a singleton, and then returns it.
 
     Args:
         settings_class: The class type of the settings to resolve.
@@ -169,27 +169,9 @@ def get_settings(settings_class: type[T] = Settings) -> T:
 
 
 class SettingsProxy:
-    """Proxy object providing lazy attribute access to the active settings instance.
-
-    This proxy allows developers to import a global `settings` object without triggering
-    premature initialization of the dependency injection container or settings configuration
-    lookup during import time. Configuration lookups are dynamically resolved against the
-    active registered settings instance on demand.
-    """
+    """Proxy object providing lazy attribute access to the active settings instance."""
 
     def __getattr__(self, name: str) -> Any:
-        """Dynamically retrieve configuration values from the active settings instance.
-
-        Args:
-            name: The attribute name of the configuration option to fetch.
-
-        Returns:
-            The value associated with the specified attribute name.
-
-        Raises:
-            AttributeError: If the resolved settings instance does not contain
-                the requested attribute.
-        """
         return getattr(get_settings(), name)
 
 
