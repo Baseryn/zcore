@@ -31,8 +31,7 @@ class PaginatedResult(Generic[T]):
 
     Attributes:
         data: The segment sequence of retrieved database entities.
-        meta: A dictionary containing structural page metadata (e.g., total pages,
-            cursors, sizes, limits).
+        meta: A dictionary containing structural page metadata.
     """
 
     def __init__(self, data: Sequence[T], meta: dict[str, Any]):
