@@ -248,7 +248,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     async def create_multi(
         self, schemas: list[BaseModel], refresh: bool = False
     ) -> Sequence[ModelType]:
-        """Create multiple database records from a list of validation schemas.
+        """Create multiple database records with dialect-aware fallback for returning support.
 
         Args:
             schemas: A list of Pydantic schemas representing the new database objects.
@@ -262,10 +262,26 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return []
 
         payloads = [schema.model_dump() for schema in schemas]
-        stmt = insert(self.model).values(payloads).returning(self.model)
-        result = await self.db.execute(stmt)
-        await self.db.flush()
-        return list(result.scalars().all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "insert_returning", False))
+
+        if supports_returning:
+            stmt = insert(self.model).values(payloads).returning(self.model)
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            records = list(result.scalars().all())
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
+        else:
+            records = [self.model(**p) for p in payloads]
+            self.db.add_all(records)
+            await self.db.flush()
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
 
     async def update(
         self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
@@ -303,12 +319,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         Args:
             data: A mapping of primary keys to their update schemas.
+            partial: If True, ignores unset schema fields. Defaults to False.
+            refresh: Parameter maintained for interface consistency. Defaults to False.
 
         Returns:
             A sequence containing the updated database model instances.
-
-        Raises:
-            sqlalchemy.orm.exc.StaleDataError: If any target primary key does not exist.
         """
         if not data:
             return []
@@ -346,7 +361,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
-        """Delete multiple records matching the provided list of primary keys.
+        """Delete multiple records matching the provided list of primary keys with dialect-aware fallback.
 
         Args:
             ids: A list of primary key values of records to delete.
@@ -357,10 +372,21 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
-        result = await self.db.scalars(stmt)
-        await self.db.flush()
-        return list(result.all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "delete_returning", False))
+
+        if supports_returning:
+            stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+            result = await self.db.scalars(stmt)
+            await self.db.flush()
+            return list(result.all())
+        else:
+            records = list(await self.get_by_ids(ids=ids))
+            if records:
+                stmt = delete(self.model).where(self.pk.in_(ids))
+                await self.db.execute(stmt)
+                await self.db.flush()
+            return records
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
