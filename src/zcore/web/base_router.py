@@ -483,7 +483,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         Returns:
             The list of resolved model records wrapped in a ResponseWrapper.
         """
-        result = await service.get_list(pagination)
+        result = await service.get_list(pagination=pagination)
         from zcore.db.pagination import PaginatedResult
 
         if isinstance(result, PaginatedResult):

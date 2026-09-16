@@ -166,19 +166,19 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
 
     async def get_list(
         self,
+        *criterion: Any,
         pagination: Any = None,
         fields: list[Any] | None = None,
         options: list[ExecutableOption] | None = None,
-        *criterion: Any,
         **filters: Any,
     ) -> Any:
         """Fetch a paginated or complete list of records matching filters.
 
         Args:
+            *criterion: Positional binary SQLAlchemy filter expressions.
             pagination: Pagination parameters. Defaults to None.
             fields: Specific entity fields to selectively load. Defaults to None.
             options: Additional SQLAlchemy execution options. Defaults to None.
-            *criterion: Positional binary SQLAlchemy filter expressions.
             **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
