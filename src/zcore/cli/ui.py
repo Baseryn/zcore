@@ -27,7 +27,7 @@ def print_banner() -> None:
     console.print()
     console.print(
         f"[bold {ZCORE_PRIMARY}]⚡ ZCore Framework[/bold {ZCORE_PRIMARY}] "
-        f"[dim white]v0.1.0-beta.9[/dim white] "
+        f"[dim white]v0.1.0-rc.1[/dim white] "
         f"[{ZCORE_MUTED}]• Modern Modular Monolith[/{ZCORE_MUTED}]"
     )
     console.print(f" [dim {ZCORE_MUTED}]FastAPI • SQLAlchemy 2.0 • Pydantic V2[/dim {ZCORE_MUTED}]")

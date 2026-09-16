@@ -34,7 +34,7 @@ async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
-        "version": "0.1.0-beta.9",
+        "version": "0.1.0-rc.1",
         "debug": settings.DEBUG
     }
 """

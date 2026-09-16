@@ -276,11 +276,11 @@ def test_cli_version_output_beta_9() -> None:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
-    assert "0.1.0-beta.9" in capture.get()
+    assert "0.1.0-rc.1" in capture.get()
 
     with console.capture() as capture:
         print_banner()
-    assert "0.1.0-beta.9" in capture.get()
+    assert "0.1.0-rc.1" in capture.get()
 
 
 def test_cli_scaffold_templates_use_database_settings_config(run_in_tmp_path: Path) -> None:

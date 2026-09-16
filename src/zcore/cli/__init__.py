@@ -246,7 +246,7 @@ def main() -> None:
         args = parser.parse_args()
 
         if args.version:
-            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-beta.9[/bold white]")
+            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.1[/bold white]")
             sys.exit(0)
 
         if args.command == "init":
