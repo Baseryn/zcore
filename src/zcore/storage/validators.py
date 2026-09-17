@@ -32,20 +32,20 @@ BLOCKED_HEADER_PREFIXES: tuple[bytes, ...] = (
 )
 
 MALICIOUS_CONTENT_PATTERNS: tuple[re.Pattern[bytes], ...] = (
-    re.compile(b"<\?php", re.IGNORECASE),
-    re.compile(b"<script[\s>]", re.IGNORECASE),
-    re.compile(b"javascript:", re.IGNORECASE),
-    re.compile(b"vbscript:", re.IGNORECASE),
-    re.compile(b"data:text/html", re.IGNORECASE),
-    re.compile(b"<!doctype\s+html", re.IGNORECASE),
-    re.compile(b"<html[\s>]", re.IGNORECASE),
-    re.compile(b"<iframe[\s>]", re.IGNORECASE),
-    re.compile(b"<object[\s>]", re.IGNORECASE),
-    re.compile(b"<embed[\s>]", re.IGNORECASE),
-    re.compile(b"onload\s*=", re.IGNORECASE),
-    re.compile(b"onerror\s*=", re.IGNORECASE),
-    re.compile(b"onclick\s*=", re.IGNORECASE),
-    re.compile(b"xlink:href\s*=\s*[\"']javascript:", re.IGNORECASE),
+    re.compile(rb"<\?php", re.IGNORECASE),
+    re.compile(rb"<script[\s>]", re.IGNORECASE),
+    re.compile(rb"javascript:", re.IGNORECASE),
+    re.compile(rb"vbscript:", re.IGNORECASE),
+    re.compile(rb"data:text/html", re.IGNORECASE),
+    re.compile(rb"<!doctype\s+html", re.IGNORECASE),
+    re.compile(rb"<html[\s>]", re.IGNORECASE),
+    re.compile(rb"<iframe[\s>]", re.IGNORECASE),
+    re.compile(rb"<object[\s>]", re.IGNORECASE),
+    re.compile(rb"<embed[\s>]", re.IGNORECASE),
+    re.compile(rb"onload\s*=", re.IGNORECASE),
+    re.compile(rb"onerror\s*=", re.IGNORECASE),
+    re.compile(rb"onclick\s*=", re.IGNORECASE),
+    re.compile(rb"xlink:href\s*=\s*[\"']javascript:", re.IGNORECASE),
 )
 
 
