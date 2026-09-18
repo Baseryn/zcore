@@ -53,16 +53,19 @@ class Zchema(BaseModel):
         return relative_paths
 
     @classmethod
-    def _prune_data(cls, data: Any, relative_paths: set[str]) -> Any:
-        """Recursively strip restricted attributes from dict representations."""
-        if not relative_paths or not isinstance(data, dict):
+    def _prune_data(
+        cls,
+        data: Any,
+        relative_paths: set[str],
+    ) -> Any:
+        """Recursively strip restricted attributes from dictionary representations."""
+        if not isinstance(data, dict):
             return data
 
         if "*" in relative_paths:
             data.clear()
             return data
 
-        # Group remaining nested relative paths by top-level keys
         nested_restrictions: dict[str, set[str]] = {}
         for path in relative_paths:
             parts = path.split(".", 1)
@@ -74,18 +77,28 @@ class Zchema(BaseModel):
                     nested_restrictions[key] = set()
                 nested_restrictions[key].add(remaining)
 
-        # Process nested levels recursively
-        for key, remaining_paths in nested_restrictions.items():
-            if key in data:
-                if isinstance(data[key], dict):
-                    data[key] = cls._prune_data(data[key], remaining_paths)
-                elif isinstance(data[key], list):
+        for key in list(data.keys()):
+            val = data[key]
+            if key in nested_restrictions:
+                rem_paths = nested_restrictions[key]
+                if isinstance(val, dict):
+                    data[key] = cls._prune_data(val, rem_paths)
+                elif isinstance(val, list):
                     data[key] = [
-                        cls._prune_data(item, remaining_paths)
+                        cls._prune_data(item, rem_paths)
                         if isinstance(item, dict)
                         else item
-                        for item in data[key]
+                        for item in val
                     ]
+            elif isinstance(val, dict):
+                data[key] = cls._prune_data(val, set())
+            elif isinstance(val, list):
+                data[key] = [
+                    cls._prune_data(item, set())
+                    if isinstance(item, dict)
+                    else item
+                    for item in val
+                ]
         return data
 
     @classmethod
@@ -145,13 +158,13 @@ class Zchema(BaseModel):
 
     @model_serializer(mode="wrap")
     def secure_serializer(self, handler: Any) -> Any:
-        """Securely intercept serialization to prune restricted attributes from response."""
+        """Securely intercept serialization to prune restricted attributes."""
         serialized = handler(self)
         relative_paths = self._get_relative_restricted_paths()
-        if not relative_paths or serialized is None:
+        if serialized is None:
             return serialized
 
-        if isinstance(serialized, dict):
+        if isinstance(serialized, dict) and relative_paths:
             serialized_copy = dict(serialized)
             return self._prune_data(serialized_copy, relative_paths)
         return serialized

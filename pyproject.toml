@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache License 2.0" }
 authors = [
-    { name = "Ali Alf Ostovar", email = "240363843+alialfostovar@users.noreply.github.com" }
+    { name = "Ali Alf Ostovar"}
 ]
 maintainers = [
-    { name = "Baseryn" }
+    { name = "Baseryn", email = "support@baseryn.com"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -36,6 +36,7 @@ dependencies = [
     "uvicorn>=0.22.0",
     "questionary>=2.0.1",
     "rich>=13.7.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -80,12 +81,13 @@ all = [
     "aiofiles>=23.2.1",
     "argon2-cffi>=23.1.0",
     "pyjwt>=2.8.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Baseryn/zcore"
 Repository = "https://github.com/Baseryn/zcore"
-Documentation = "https://baseryn.github.io/zcore-docs/"
+Documentation = "https://zcore.baseryn.com"
 "Bug Tracker" = "https://github.com/Baseryn/zcore/issues"
 
 [project.scripts]

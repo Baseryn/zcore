@@ -17,7 +17,7 @@
   <a href="https://github.com/Baseryn/zcore/actions/workflows/test.yml">
     <img src="https://github.com/Baseryn/zcore/actions/workflows/test.yml/badge.svg" alt="CI">
   </a>
-  <a href="https://baseryn.github.io/zcore-docs/">
+  <a href="https://zcore.baseryn.com">
     <img src="https://img.shields.io/badge/docs-online-purple" alt="Documentation">
   </a>
   <a href="https://pypi.org/project/fastapi-zcore-framework/">
@@ -103,7 +103,7 @@ zc run
 
 Your API is live at **`http://127.0.0.1:8000`** with 7 secure endpoints (CRUD + Dynamic Search) ready.
 
-> 📖 **Full walkthrough:** [Quick Start Guide](https://baseryn.github.io/zcore-docs/docs/quick-start)
+> 📖 **Full walkthrough:** [Quick Start Guide](https://zcore.baseryn.com/docs/quick-start)
 
 ---
 
@@ -124,7 +124,7 @@ class TaskResponse(Zchema):
     
     id: uuid.UUID
     title: str
-    salary: float  # Automatically pruned if unauthorized
+    salary: float | None = None # Automatically pruned if unauthorized
 ```
 
 When an authenticated user lacks view permissions for `tasks.salary`, the field vanishes from both JSON serialization and the OpenAPI schema — with zero manual `if` statements.
@@ -229,7 +229,7 @@ The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered
 ```text
 $ zc
 
-⚡ ZCore Framework v0.1.0-Beta • Modern Modular Monolith
+⚡ ZCore Framework v0.1.0-rc.1 • Modern Modular Monolith
  FastAPI • SQLAlchemy 2.0 • Pydantic V2
 
 ? What framework task would you like to perform? 📦 init — Scaffold a new full ZCore project
@@ -260,12 +260,12 @@ $ zc
 
 | Resource | Description |
 |----------|-------------|
-| [🚀 Quick Start](https://baseryn.github.io/zcore-docs/docs/quick-start) | Build a complete Task Manager API from scratch |
-| [📚 10-Step Quick Learn](https://baseryn.github.io/zcore-docs/docs/quick-learn/step-1) | Deep dive into each architectural layer step-by-step |
-| [🔧 How-To Guides](https://baseryn.github.io/zcore-docs/docs/how-to) | Pagination, search, file uploads, caching, and testing |
-| [🏛️ Core Concepts](https://baseryn.github.io/zcore-docs/docs/core-concepts/context) | Deep dive into DI, Kernel, Security, UoW, and Zchema |
-| [📜 API Reference](https://baseryn.github.io/zcore-docs/docs/api-reference/repository) | Complete class and method specifications |
-| [🕒 Changelog](https://baseryn.github.io/zcore-docs/docs/changelog) | Release notes, breaking changes, and migrations |
+| [🚀 Quick Start](https://zcore.baseryn.com/docs/quick-start) | Build a complete Task Manager API from scratch |
+| [📚 10-Step Quick Learn](https://zcore.baseryn.com/docs/quick-learn/step-1) | Deep dive into each architectural layer step-by-step |
+| [🔧 How-To Guides](https://zcore.baseryn.com/docs/how-to) | Pagination, search, file uploads, caching, and testing |
+| [🏛️ Core Concepts](https://zcore.baseryn.com/docs/core-concepts/context) | Deep dive into DI, Kernel, Security, UoW, and Zchema |
+| [📜 API Reference](https://zcore.baseryn.com/docs/api-reference/repository) | Complete class and method specifications |
+| [🕒 Changelog](https://zcore.baseryn.com/docs/changelog) | Release notes, breaking changes, and migrations |
 
 ---
 

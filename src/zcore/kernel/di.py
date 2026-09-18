@@ -2,8 +2,8 @@
 
 This module implements custom Singleton, Scoped, and Transient injection strategies.
 It resolves types dynamically using constructor reflection, utilizing signature caching
-to mitigate reflection runtime performance overhead, and implements protective mechanisms
-against cyclic dependencies.
+to mitigate reflection runtime performance overhead, implements protective mechanisms
+against cyclic dependencies, and coordinates isolated background task execution scopes.
 """
 
 import functools
@@ -21,13 +21,14 @@ from typing import (
     get_type_hints,
 )
 
+import structlog
 from anyio import to_thread
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = structlog.get_logger()
 T = TypeVar("T")
 
-# Safe context storage for active scoped instances
 _current_scope_id: ContextVar[str | None] = ContextVar("scope_id", default=None)
 _scoped_instances: ContextVar[dict[type[Any], Any]] = ContextVar(
     "scoped_instances", default={}
@@ -58,8 +59,7 @@ class IoCContainer:
         _scoped_definitions: Mappings of interfaces to factory functions bound to request contexts.
         _factories: Mappings of interfaces to factory functions for transient lifecycles.
         _constructor_cache: Cache storing raw init constructors of target classes.
-        _dependency_signature_cache: Cache storing evaluated constructor dependencies
-            of targets.
+        _dependency_signature_cache: Cache storing evaluated constructor dependencies of targets.
     """
 
     def __init__(self) -> None:
@@ -68,7 +68,6 @@ class IoCContainer:
         self._scoped_definitions: dict[type[Any], Callable[..., Any]] = {}
         self._factories: dict[type[Any], Callable[..., Any]] = {}
 
-        # High-performance caching for resolved type hints and constructors
         self._constructor_cache: dict[type[Any], Callable[..., Any] | None] = {}
         self._dependency_signature_cache: dict[type[Any], list[type[Any]]] = {}
 
@@ -191,7 +190,6 @@ class IoCContainer:
         if not inspect.isclass(target_class):
             return target_class
 
-        # Initialize recursion verification stack
         _stack = _stack or set()
         if target_class in _stack:
             chain = (
@@ -203,7 +201,6 @@ class IoCContainer:
         _stack.add(target_class)
 
         try:
-            # High-Performance Signature Caching Lookup
             if target_class in self._dependency_signature_cache:
                 dependencies = self._dependency_signature_cache[target_class]
                 resolved_args = [
@@ -211,7 +208,6 @@ class IoCContainer:
                 ]
                 return target_class(*resolved_args)
 
-            # Retrieve constructor safely
             if target_class not in self._constructor_cache:
                 constructor = getattr(target_class, "__init__", None)
                 self._constructor_cache[target_class] = constructor
@@ -222,7 +218,6 @@ class IoCContainer:
                 self._dependency_signature_cache[target_class] = []
                 return target_class()
 
-            # Using typing.get_type_hints to resolve forward references
             try:
                 type_hints = get_type_hints(constructor)
             except Exception:
@@ -234,7 +229,6 @@ class IoCContainer:
             for name, param in sig.parameters.items():
                 if name == "self":
                     continue
-                # Resolve the annotation type, checking get_type_hints first for forward references
                 annotation = type_hints.get(name, param.annotation)
                 if annotation is inspect.Parameter.empty:
                     continue
@@ -244,7 +238,6 @@ class IoCContainer:
 
                 dependencies.append(annotation)
 
-            # Warm cache for subsequent requests (reduces reflection overhead)
             self._dependency_signature_cache[target_class] = dependencies
 
             resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
@@ -255,8 +248,6 @@ class IoCContainer:
 
     def clear_scope(self, scope_id: str) -> None:
         """Explicit scope cleanup hook.
-
-        Maintains structural compatibility with scoped lifecycle triggers.
 
         Args:
             scope_id: The string identifier of the scope to purge.
@@ -294,13 +285,11 @@ class Injector:
 class Inject:
     """Dynamic type marker supporting unified Annotated dependency injection.
 
-    Allows elegant type annotations in FastAPI routers, e.g., `service: Inject[UserService]`.
-    Under the hood, this converts the parameter metadata using `Annotated` and
-    binds it to the IoC container's resolver.
+    Allows type annotations in FastAPI routers, e.g., `service: Inject[UserService]`.
     """
 
     def __class_getitem__(cls, interface: type[T]) -> Any:
-        """Map the class generic bracket access to an Annotated dependency representation.
+        """Map generic bracket access to an Annotated dependency representation.
 
         Args:
             interface: The target type interface dependency to resolve.
@@ -319,13 +308,12 @@ async def background_scope(
     """Provide an isolated IoC, Database Session, and ZContext scope for background tasks.
 
     Ensures that asynchronous background routines execute within an independent transaction
-    boundary and IoC scope without relying on or interfering with completed HTTP request lifecycles.
+    boundary and IoC scope without relying on completed HTTP request lifecycles.
     Automatically manages database session allocation, context variable isolation, and guaranteed
     resource disposal upon exit.
 
     Args:
-        inherit_context: If True, clones active request context parameters (e.g., user_id, scopes)
-            into the background scope. Defaults to True.
+        inherit_context: If True, clones active request context parameters into the background scope.
         **custom_context: Explicit key-value pairs to set or override in the background context store.
 
     Yields:
@@ -355,8 +343,8 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator that wraps a background task with an isolated scope and auto-resolves dependencies.
 
     Inspects the wrapped function's signature and automatically resolves any unprovided,
-    type-annotated parameters directly from the global IoC container. Supports both asynchronous
-    coroutines and standard synchronous functions (executed asynchronously in a worker threadpool).
+    type-annotated parameters directly from the global IoC container within a dedicated background scope.
+    Supports both asynchronous coroutines and standard synchronous functions.
 
     Args:
         func: The target synchronous or asynchronous callable to execute in the background.
@@ -365,6 +353,20 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
         An asynchronous wrapped callable suitable for scheduling with FastAPI BackgroundTasks.
     """
     is_coroutine = inspect.iscoroutinefunction(func)
+
+    def _warn_if_closed_session_passed(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        for arg in args:
+            if isinstance(arg, AsyncSession):
+                logger.warning(
+                    "Passing an existing AsyncSession directly to a background task is discouraged. "
+                    "Background tasks should allow @background_task to inject an isolated session automatically."
+                )
+        for k, v in kwargs.items():
+            if isinstance(v, AsyncSession):
+                logger.warning(
+                    f"Passing an existing AsyncSession directly via argument '{k}' to a background task is discouraged. "
+                    "Background tasks should allow @background_task to inject an isolated session automatically."
+                )
 
     def _resolve_injections(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
         sig = inspect.signature(func)
@@ -387,16 +389,20 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
         return resolved_kwargs
 
     if is_coroutine:
+
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            _warn_if_closed_session_passed(args, kwargs)
             async with background_scope():
                 final_kwargs = _resolve_injections(args, kwargs)
                 return await func(*args, **final_kwargs)
 
         return async_wrapper
     else:
+
         @functools.wraps(func)
         async def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            _warn_if_closed_session_passed(args, kwargs)
             async with background_scope():
                 final_kwargs = _resolve_injections(args, kwargs)
                 return await to_thread.run_sync(

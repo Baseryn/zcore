@@ -3,10 +3,11 @@
 This module provides a unified cache manager supporting distributed caching (via Redis)
 with an asynchronous, thread-safe local fallback (via `TTLLRUCache`). It coordinates
 global cache lifecycles, structured serialization and deserialization, and automatically
-spawns background memory eviction routines.
+spawns background memory eviction routines safely within active event loops.
 """
 
 import asyncio
+import contextlib
 from typing import Any, Generic, TypeVar
 
 import structlog
@@ -29,18 +30,34 @@ _shared_redis_client: Any | None = None
 _eviction_task: asyncio.Task | None = None
 
 
+def _ensure_eviction_task(interval: int = 60) -> None:
+    """Schedule the background memory eviction task if an active event loop is running.
+
+    Args:
+        interval: Rest period duration in seconds between garbage collection sweeps.
+            Defaults to 60.
+    """
+    global _eviction_task
+    try:
+        loop = asyncio.get_running_loop()
+        if _eviction_task is None or _eviction_task.done():
+            _eviction_task = loop.create_task(_start_eviction_loop(interval=interval))
+    except RuntimeError:
+        pass
+
+
 def init_cache(redis_url: str | None = None, **kwargs: Any) -> None:
     """Initialize global distributed caching clients and local eviction workers.
 
     Configures a shared Redis connection client if library support and server configurations
-    are available. In addition, always schedules the active background memory eviction worker
-    loop to periodically purge expired local records.
+    are available. In addition, attempts to schedule the active background memory eviction worker
+    loop if an event loop is currently active.
 
     Args:
         redis_url: Connection URL pointing to a Redis server instance. Defaults to None.
         **kwargs: Connection pool parameters passed directly to the Redis client initialization.
     """
-    global _shared_redis_client, _eviction_task
+    global _shared_redis_client
 
     if REDIS_AVAILABLE and redis_url:
         try:
@@ -51,8 +68,7 @@ def init_cache(redis_url: str | None = None, **kwargs: Any) -> None:
         except Exception as e:
             logger.error(f"Failed to initialize shared Redis client: {e}")
 
-    if _eviction_task is None or _eviction_task.done():
-        _eviction_task = asyncio.create_task(_start_eviction_loop(interval=60))
+    _ensure_eviction_task()
 
 
 async def _start_eviction_loop(interval: int = 60) -> None:
@@ -78,6 +94,8 @@ async def close_cache() -> None:
 
     if _eviction_task and not _eviction_task.done():
         _eviction_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _eviction_task
         _eviction_task = None
         logger.info("Cache memory eviction loop stopped.")
 
@@ -149,6 +167,7 @@ class BaseCache(Generic[T]):
             The parsed data structure or validated Pydantic model instance, or None if the
             key is not found or fails to deserialize.
         """
+        _ensure_eviction_task()
         full_key = self._get_key(key)
         client = self.redis_client
         raw_val = None
@@ -189,6 +208,7 @@ class BaseCache(Generic[T]):
             value: The data payload to serialize and cache.
             ttl: Maximum cache duration in seconds. Defaults to 3600.
         """
+        _ensure_eviction_task()
         full_key = self._get_key(key)
         client = self.redis_client
 
@@ -209,6 +229,7 @@ class BaseCache(Generic[T]):
         Args:
             key: The unique key identifier to evict.
         """
+        _ensure_eviction_task()
         full_key = self._get_key(key)
         client = self.redis_client
         if client:

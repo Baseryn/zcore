@@ -1,10 +1,20 @@
-from datetime import UTC, datetime
+"""Soft Delete Mixin Module.
+
+This module provides the soft delete capability for SQLAlchemy declarative models,
+managing record suppression and restoration using timezone-aware timestamps.
+"""
+
+from datetime import datetime
 
 from sqlalchemy import DateTime, Select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from zcore.utils.timezone import now
+
 
 class SoftDeleteMixin:
+    """Mixin providing soft-deletion capabilities to SQLAlchemy declarative models."""
+
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=None,
@@ -21,7 +31,7 @@ class SoftDeleteMixin:
         return query.where(cls.deleted_at.is_(None))
 
     def soft_delete(self) -> None:
-        self.deleted_at = datetime.now(UTC)
+        self.deleted_at = now()
 
     def restore(self) -> None:
         self.deleted_at = None

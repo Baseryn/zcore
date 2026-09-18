@@ -166,19 +166,19 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
 
     async def get_list(
         self,
+        *criterion: Any,
         pagination: Any = None,
         fields: list[Any] | None = None,
         options: list[ExecutableOption] | None = None,
-        *criterion: Any,
         **filters: Any,
     ) -> Any:
         """Fetch a paginated or complete list of records matching filters.
 
         Args:
+            *criterion: Positional binary SQLAlchemy filter expressions.
             pagination: Pagination parameters. Defaults to None.
             fields: Specific entity fields to selectively load. Defaults to None.
             options: Additional SQLAlchemy execution options. Defaults to None.
-            *criterion: Positional binary SQLAlchemy filter expressions.
             **filters: Keyword key-value arguments for standard equality filters.
 
         Returns:
@@ -248,7 +248,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
     async def create_multi(
         self, schemas: list[BaseModel], refresh: bool = False
     ) -> Sequence[ModelType]:
-        """Create multiple database records from a list of validation schemas.
+        """Create multiple database records with dialect-aware fallback for returning support.
 
         Args:
             schemas: A list of Pydantic schemas representing the new database objects.
@@ -262,18 +262,34 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return []
 
         payloads = [schema.model_dump() for schema in schemas]
-        stmt = insert(self.model).values(payloads).returning(self.model)
-        result = await self.db.execute(stmt)
-        await self.db.flush()
-        return list(result.scalars().all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "insert_returning", False))
+
+        if supports_returning:
+            stmt = insert(self.model).values(payloads).returning(self.model)
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            records = list(result.scalars().all())
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
+        else:
+            records = [self.model(**p) for p in payloads]
+            self.db.add_all(records)
+            await self.db.flush()
+            if refresh:
+                for r in records:
+                    await self.db.refresh(r)
+            return records
 
     async def update(
-        self, id: Any, schema: BaseModel, partial: bool = False, **extra_data: Any
+        self, target: ModelType | Any, schema: BaseModel, partial: bool = False, **extra_data: Any,
     ) -> ModelType | None:
-        """Update an existing database record with dynamic fields.
+        """Update an existing database record from a model instance or primary key.
 
         Args:
-            id: The primary key identifier of the record to update.
+            target: The model instance or primary key identifier of the record to update.
             schema: The Pydantic update schema containing modified parameters.
             partial: If True, applies modifications as a partial patch (ignoring unset fields).
                 If False, updates the record using all fields. Defaults to False.
@@ -282,9 +298,13 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         Returns:
             The updated and refreshed database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         update_data = schema.model_dump(exclude_unset=partial)
         update_data.update(extra_data)
         for field, value in update_data.items():
@@ -294,32 +314,32 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def update_multi(
-        self, data: dict[Any, BaseModel], partial: bool = False, refresh: bool = False
+        self, data: dict[ModelType | Any, BaseModel], partial: bool = False, refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Bulk update multiple database records using DBAPI executemany.
 
-        Executes the updates without hydrating ORM entities beforehand, then fetches
-        and returns the updated model instances in a single batch query.
-
         Args:
-            data: A mapping of primary keys to their update schemas.
+            data: A mapping of model instances or primary keys to their update schemas.
+            partial: If True, ignores unset schema fields. Defaults to False.
+            refresh: Parameter maintained for interface consistency. Defaults to False.
 
         Returns:
             A sequence containing the updated database model instances.
-
-        Raises:
-            sqlalchemy.orm.exc.StaleDataError: If any target primary key does not exist.
         """
         if not data:
             return []
 
-        payloads = [
-            {
-                **schema.model_dump(exclude_unset=partial),
-                self.pk_name: pk_val,
-            }
-            for pk_val, schema in data.items()
-        ]
+        payloads = []
+        target_ids = []
+        for key, schema in data.items():
+            pk_val = getattr(key, self.pk_name, key)
+            target_ids.append(pk_val)
+            payloads.append(
+                {
+                    **schema.model_dump(exclude_unset=partial),
+                    self.pk_name: pk_val,
+                }
+            )
 
         await self.db.execute(
             update(self.model),
@@ -327,26 +347,30 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         )
         await self.db.flush()
 
-        return await self.get_by_ids(ids=list(data.keys()))
+        return await self.get_by_ids(ids=target_ids)
 
-    async def delete(self, id: Any) -> ModelType | None:
-        """Delete a single record by its primary key identifier.
+    async def delete(self, target: ModelType | Any) -> ModelType | None:
+        """Delete a single record by its model instance or primary key identifier.
 
         Args:
-            id: The primary key value of the target record to delete.
+            target: The model instance or primary key value of the target record to delete.
 
         Returns:
             The deleted database model instance, or None if the record was not found.
         """
-        record = await self.get(**{self.pk_name: id})
-        if not record:
-            return None
+        if isinstance(target, self.model):
+            record = target
+        else:
+            record = await self.get(**{self.pk_name: target})
+            if not record:
+                return None
+
         await self.db.delete(record)
         await self.db.flush()
         return record
 
     async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
-        """Delete multiple records matching the provided list of primary keys.
+        """Delete multiple records matching the provided list of primary keys with dialect-aware fallback.
 
         Args:
             ids: A list of primary key values of records to delete.
@@ -357,10 +381,21 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
-        result = await self.db.scalars(stmt)
-        await self.db.flush()
-        return list(result.all())
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_returning = bool(getattr(dialect, "delete_returning", False))
+
+        if supports_returning:
+            stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+            result = await self.db.scalars(stmt)
+            await self.db.flush()
+            return list(result.all())
+        else:
+            records = list(await self.get_by_ids(ids=ids))
+            if records:
+                stmt = delete(self.model).where(self.pk.in_(ids))
+                await self.db.execute(stmt)
+                await self.db.flush()
+            return records
 
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):

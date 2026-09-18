@@ -2,7 +2,7 @@
 
 This module coordinates application modules, managing registration, dependency resolution,
 and topological sorting of Plugins. It orchestrates async startup and shutdown Lifespan hooks
-associated with FastAPI applications.
+associated with FastAPI applications, ensuring guaranteed resource disposal upon termination.
 """
 
 import graphlib
@@ -97,7 +97,8 @@ class Kernel:
         """Asynchronous context manager governing the active application lifespan.
 
         Sequentially invokes startup lifecycle phases on sorted plugin units
-        and guarantees clean, reversed tear-down triggers upon termination.
+        and guarantees clean, reversed tear-down triggers upon termination,
+        including automatic database and cache connection disposal.
 
         Args:
             app: The active running FastAPI instance.
@@ -122,3 +123,9 @@ class Kernel:
         finally:
             for plugin in reversed(self._sorted_plugins):
                 await plugin.on_shutdown()
+
+            from zcore.cache.base import close_cache
+            from zcore.db.setup import db_manager
+
+            await close_cache()
+            await db_manager.close()

@@ -1,8 +1,8 @@
 """Common Utility Helper Functions.
 
 This module provides common utility helper functions, including a custom JSON encoder
-that safely processes dates, decimals, and UUIDs, corresponding serialization/deserialization
-wrappers, and a text transformation utility to generate URL-safe slugs.
+that safely processes dates, decimals, UUIDs, and timezone-aware datetimes, corresponding
+serialization/deserialization wrappers, and a text transformation utility to generate URL-safe slugs.
 """
 
 import json
@@ -14,7 +14,9 @@ from typing import Annotated, Any
 
 from pydantic import HttpUrl, PlainSerializer
 
-# Serializes HttpUrl objects into clean strings dynamically for Pydantic exports
+from zcore.config import settings
+from zcore.utils.timezone import format_iso_with_app_timezone
+
 SafeUrl = Annotated[HttpUrl, PlainSerializer(lambda v: str(v), return_type=str)]
 
 
@@ -38,11 +40,11 @@ def slugify(text: str) -> str:
 
 
 class CustomJSONEncoder(json.JSONEncoder):
-    """JSON encoder capable of serializing advanced Python data types.
+    """JSON encoder capable of serializing advanced Python data types with timezone awareness.
 
     Extends the standard library JSONEncoder to serialize instances of UUID,
-    datetime/date/time, and Decimal, falling back to a string representation
-    for other unrecognized objects to prevent serialization failures.
+    datetime/date/time, and Decimal, applying application-level timezone conversions
+    on datetime objects according to framework settings.
     """
 
     def default(self, obj: Any) -> Any:
@@ -56,7 +58,11 @@ class CustomJSONEncoder(json.JSONEncoder):
         """
         if isinstance(obj, uuid.UUID):
             return str(obj)
-        if isinstance(obj, (datetime, date, time)):
+        if isinstance(obj, datetime):
+            if getattr(settings, "AUTO_CONVERT_TIMEZONE", True):
+                return format_iso_with_app_timezone(obj)
+            return obj.isoformat()
+        if isinstance(obj, (date, time)):
             return obj.isoformat()
         if isinstance(obj, Decimal):
             return str(obj)
