@@ -124,7 +124,7 @@ class TaskResponse(Zchema):
     
     id: uuid.UUID
     title: str
-    salary: float  # Automatically pruned if unauthorized
+    salary: float | None = None # Automatically pruned if unauthorized
 ```
 
 When an authenticated user lacks view permissions for `tasks.salary`, the field vanishes from both JSON serialization and the OpenAPI schema — with zero manual `if` statements.
