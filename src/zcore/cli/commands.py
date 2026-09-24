@@ -249,57 +249,149 @@ def start_app(
     console.print()
 
 
-def run_server(project_dir: Path | None = None) -> None:
-    work_dir = project_dir or Path.cwd()
-    main_file = work_dir / "main.py"
+def _parse_env_file(env_path: Path) -> dict[str, str]:
+    """Parse key-value pairs safely from an environment file.
 
-    if not main_file.exists():
+    Args:
+        env_path: Target .env filepath.
+
+    Returns:
+        Dictionary of environment variable keys and values.
+    """
+    env_vars: dict[str, str] = {}
+    if not env_path.exists():
+        return env_vars
+
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, v = stripped.split("=", 1)
+                env_vars[k.strip()] = v.strip().strip('"\'')
+    return env_vars
+
+
+def run_server(
+    app: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    reload: bool | None = None,
+    workers: int | None = None,
+    log_level: str | None = None,
+    env_file: str | None = None,
+    project_dir: Path | None = None,
+    extra_args: list[str] | None = None,
+) -> None:
+    """Launch development or production server using hierarchical configuration precedence.
+
+    Resolves server settings using the cascading hierarchy: CLI Argument > .env File > Defaults.
+    Forwards any arbitrary standard Uvicorn parameters transparently.
+
+    Args:
+        app: Target application import string (e.g. 'main:app').
+        host: Target network interface to bind.
+        port: Target TCP port number.
+        reload: Flag to enable/disable auto-reload on code modifications.
+        workers: Total worker processes count.
+        log_level: Logging verbosity level.
+        env_file: Custom environment file path.
+        project_dir: Project root directory path.
+        extra_args: Additional unparsed arguments forwarded directly to Uvicorn.
+    """
+    work_dir = project_dir or Path.cwd()
+    target_env_file = work_dir / (env_file or ".env")
+    env_vars = _parse_env_file(target_env_file)
+
+    target_app = app or env_vars.get("APP_MODULE") or env_vars.get("UVICORN_APP") or "main:app"
+    target_host = host or env_vars.get("HOST") or "127.0.0.1"
+
+    if port is not None:
+        target_port = port
+    elif "PORT" in env_vars and env_vars["PORT"].isdigit():
+        target_port = int(env_vars["PORT"])
+    else:
+        target_port = 8000
+
+    if reload is not None:
+        target_reload = reload
+    elif "RELOAD" in env_vars:
+        target_reload = env_vars["RELOAD"].lower() in ("true", "1", "yes")
+    elif "DEBUG" in env_vars:
+        target_reload = env_vars["DEBUG"].lower() in ("true", "1", "yes")
+    else:
+        target_reload = True
+
+    if workers is not None:
+        target_workers = workers
+    elif "WORKERS" in env_vars and env_vars["WORKERS"].isdigit():
+        target_workers = int(env_vars["WORKERS"])
+    else:
+        target_workers = None
+
+    if target_workers and target_workers > 1:
+        target_reload = False
+
+    target_log_level = (log_level or env_vars.get("LOG_LEVEL") or "info").lower()
+
+    main_py = work_dir / "main.py"
+    if ":" in target_app:
+        entry_module = target_app.split(":", 1)[0]
+        main_py = work_dir / f"{entry_module}.py"
+
+    if not main_py.exists() and target_app == "main:app":
         console.print(
             f"[bold red]❌ Error:[/bold red] 'main.py' not found in '{work_dir}'. Are you in a ZCore project root?"
         )
         sys.exit(1)
 
-    host, port = "127.0.0.1", "8000"
-    env_file = work_dir / ".env"
-
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                if line.strip() and not line.startswith("#"):
-                    parts = line.strip().split("=", 1)
-                    if len(parts) == 2:
-                        k, v = parts[0].strip(), parts[1].strip().strip('"\'')
-                        if k == "HOST":
-                            host = v
-                        elif k == "PORT":
-                            port = v
-
-    print_step_header(f"Starting ZCore Development Server ({work_dir.name})")
-    console.print(f"[dim]│[/dim]  [dim]Host: {host} | Port: {port} | Reload: Enabled[/dim]")
+    print_step_header(f"Starting ZCore Server ({work_dir.name})")
+    status_info = f"App: {target_app} | Host: {target_host} | Port: {target_port} | Reload: {target_reload}"
+    if target_workers:
+        status_info += f" | Workers: {target_workers}"
+    console.print(f"[dim]│[/dim]  [dim]{status_info}[/dim]")
     console.print("[dim]│[/dim]")
-    print_step_footer(f"Uvicorn running on [bold underline {ZCORE_ACCENT}]http://{host}:{port}[/bold underline {ZCORE_ACCENT}] [dim](Press CTRL+C to quit)[/dim]")
+    print_step_footer(
+        f"Uvicorn running on [bold underline {ZCORE_ACCENT}]http://{target_host}:{target_port}[/bold underline {ZCORE_ACCENT}] [dim](Press CTRL+C to quit)[/dim]"
+    )
 
     env = os.environ.copy()
     current_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{work_dir!s}{os.pathsep}{current_pythonpath}" if current_pythonpath else str(work_dir)
+    env["PYTHONPATH"] = (
+        f"{work_dir!s}{os.pathsep}{current_pythonpath}"
+        if current_pythonpath
+        else str(work_dir)
+    )
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        target_app,
+        f"--host={target_host}",
+        f"--port={target_port}",
+        f"--log-level={target_log_level}",
+    ]
+
+    if target_reload:
+        cmd.append("--reload")
+
+    if target_workers and target_workers > 1:
+        cmd.append(f"--workers={target_workers}")
+
+    if extra_args:
+        cmd.extend(extra_args)
 
     try:
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "main:app",
-                f"--host={host}",
-                f"--port={port}",
-                "--reload",
-            ],
+            cmd,
             cwd=work_dir,
             env=env,
             check=True,
         )
     except KeyboardInterrupt:
         console.print("\n[dim]👋 Server stopped cleanly.[/dim]\n")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]❌ Server terminated with error code:[/bold red] {e.returncode}")
     except Exception as e:
         console.print(f"[bold red]❌ Failed to run Uvicorn dev server:[/bold red] {e}")
 
@@ -308,11 +400,22 @@ def gen_secret() -> None:
     print_step_header("Generating Cryptographic Secret Key")
     secret = secrets.token_hex(32)
     print_step_footer("Generated 64-character SECRET_KEY:")
-    console.print(Panel(f"[bold {ZCORE_ACCENT}]{secret}[/bold {ZCORE_ACCENT}]", border_style=ZCORE_PRIMARY))
-    console.print(f"[{ZCORE_MUTED}]💡 Paste this into your production .env file under SECRET_KEY[/{ZCORE_MUTED}]\n")
+    console.print(
+        Panel(
+            f"[bold {ZCORE_ACCENT}]{secret}[/bold {ZCORE_ACCENT}]",
+            border_style=ZCORE_PRIMARY,
+        )
+    )
+    console.print(
+        f"[{ZCORE_MUTED}]💡 Paste this into your production .env file under SECRET_KEY[/{ZCORE_MUTED}]\n"
+    )
 
 
-def gen_env(output_file: str = ".env.example", force: bool = False, project_dir: Path | None = None) -> None:
+def gen_env(
+    output_file: str = ".env.example",
+    force: bool = False,
+    project_dir: Path | None = None,
+) -> None:
     cwd = project_dir or Path.cwd()
     parent_dir = cwd.parent
     module_name = cwd.name
@@ -327,11 +430,21 @@ def gen_env(output_file: str = ".env.example", force: bool = False, project_dir:
         sys.path.insert(0, str(cwd))
 
     subclasses = Settings.__subclasses__()
-    settings_class = max(subclasses, key=lambda c: len(c.model_fields)) if subclasses else get_settings().__class__
+    settings_class = (
+        max(subclasses, key=lambda c: len(c.model_fields))
+        if subclasses
+        else get_settings().__class__
+    )
 
-    out_path = cwd / output_file if not Path(output_file).is_absolute() else Path(output_file)
+    out_path = (
+        cwd / output_file
+        if not Path(output_file).is_absolute()
+        else Path(output_file)
+    )
     if out_path.exists() and not force:
-        console.print(f"[bold red]❌ Error:[/bold red] Output file '{out_path}' already exists. Use --force to overwrite.")
+        console.print(
+            f"[bold red]❌ Error:[/bold red] Output file '{out_path}' already exists. Use --force to overwrite."
+        )
         sys.exit(1)
 
     env_lines = []
@@ -345,7 +458,9 @@ def gen_env(output_file: str = ".env.example", force: bool = False, project_dir:
     try:
         with open(out_path, "w", encoding="utf-8") as f:
             f.write("\n".join(env_lines) + "\n")
-        print_step_footer(f"Created '{out_path.name}' based on '{settings_class.__name__}' configuration fields.")
+        print_step_footer(
+            f"Created '{out_path.name}' based on '{settings_class.__name__}' configuration fields."
+        )
     except Exception as e:
         console.print(f"[bold red]❌ Failed to generate env file:[/bold red] {e}")
         sys.exit(1)
