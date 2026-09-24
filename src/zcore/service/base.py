@@ -396,14 +396,41 @@ class SearchServiceMixin(AbstractService[ModelType]):
         """Hook triggered after processing dynamic search queries."""
         pass
 
-    async def on_search(self, search_in: SearchRequest, pagination: Any = None):
+    async def on_search(
+        self,
+        search_in: SearchRequest,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
         """Execute core search queries in database."""
-        return await self.repository.search(search_in, pagination)
+        return await self.repository.search(
+            search_in, pagination=pagination, fields=fields, options=options
+        )
 
-    async def search(self, search_in: SearchRequest, pagination: Any = None) -> Any:
-        """Build and execute dynamic filters, pre-loading patterns, and sorting paths."""
+    async def search(
+        self,
+        search_in: SearchRequest,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
+        """Build and execute dynamic filters, pre-loading patterns, and sorting paths.
+
+        Args:
+            search_in: The system-wide dynamic search request model.
+            pagination: Pagination settings (cursor or offset models). Defaults to None.
+            fields: Specific entity fields to selectively load. Defaults to None.
+            options: Additional execution options. Defaults to None.
+
+        Returns:
+            A paginated wrapper envelope containing post-search processed records,
+            or an unpaginated sequence of processed database model instances.
+        """
         await self.pre_search(search_in)
-        result = await self.on_search(search_in, pagination)
+        result = await self.on_search(
+            search_in, pagination=pagination, fields=fields, options=options
+        )
         if pagination is None:
             await self.post_search(result)
             return result
