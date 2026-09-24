@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from pydantic_core import PydanticUndefined
 from rich.panel import Panel
@@ -37,8 +38,14 @@ from zcore.config import Settings, get_settings
 
 DB_DRIVERS = {
     "sqlite": {"url": "sqlite+aiosqlite:///zcore_dev.db", "pkg": ""},
-    "postgres": {"url": "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/zcore_dev", "pkg": "\nasyncpg>=0.29.0"},
-    "mysql": {"url": "mysql+aiomysql://root:root@127.0.0.1:3306/zcore_dev", "pkg": "\naiomysql>=0.2.0"},
+    "postgres": {
+        "url": "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/zcore_dev",
+        "pkg": "\nasyncpg>=0.29.0",
+    },
+    "mysql": {
+        "url": "mysql+aiomysql://root:root@127.0.0.1:3306/zcore_dev",
+        "pkg": "\naiomysql>=0.2.0",
+    },
 }
 
 COMPONENT_TEMPLATES = {
@@ -86,12 +93,34 @@ def find_zcore_projects(path: Path = Path.cwd()) -> list[str]:
 def setup_virtualenv(project_dir: Path, pkg_manager: str = "pip") -> bool:
     try:
         if pkg_manager == "uv":
-            subprocess.run(["uv", "venv", ".venv"], cwd=project_dir, check=True, capture_output=True)
-            subprocess.run(["uv", "pip", "install", "-r", "requirements.txt"], cwd=project_dir, check=True, capture_output=True)
+            subprocess.run(
+                ["uv", "venv", ".venv"],
+                cwd=project_dir,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["uv", "pip", "install", "-r", "requirements.txt"],
+                cwd=project_dir,
+                check=True,
+                capture_output=True,
+            )
         else:
-            subprocess.run([sys.executable, "-m", "venv", ".venv"], cwd=project_dir, check=True, capture_output=True)
-            python_bin = project_dir / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-            subprocess.run([str(python_bin), "-m", "pip", "install", "-r", "requirements.txt"], cwd=project_dir, check=True, capture_output=True)
+            subprocess.run(
+                [sys.executable, "-m", "venv", ".venv"],
+                cwd=project_dir,
+                check=True,
+                capture_output=True,
+            )
+            python_bin = project_dir / ".venv" / (
+                "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+            )
+            subprocess.run(
+                [str(python_bin), "-m", "pip", "install", "-r", "requirements.txt"],
+                cwd=project_dir,
+                check=True,
+                capture_output=True,
+            )
         return True
     except Exception:
         return False
@@ -105,7 +134,9 @@ def init_project(
 ) -> None:
     project_dir = Path(project_name.lower())
     if project_dir.exists():
-        console.print(f"[bold red]❌ Error:[/bold red] Directory '{project_dir}' already exists.")
+        console.print(
+            f"[bold red]❌ Error:[/bold red] Directory '{project_dir}' already exists."
+        )
         sys.exit(1)
 
     project_dir.mkdir(parents=True)
@@ -169,13 +200,25 @@ def init_project(
     console.print()
 
     console.print("[bold]Next steps:[/bold]")
-    console.print(f"  [dim]1.[/dim] [{ZCORE_ACCENT}]cd[/{ZCORE_ACCENT}] {project_name}")
+    console.print(
+        f"  [dim]1.[/dim] [{ZCORE_ACCENT}]cd[/{ZCORE_ACCENT}] {project_name}"
+    )
     if not install_deps:
-        console.print(f"  [dim]2.[/dim] [{ZCORE_ACCENT}]pip install -r requirements.txt[/{ZCORE_ACCENT}]")
+        console.print(
+            f"  [dim]2.[/dim] [{ZCORE_ACCENT}]pip install -r requirements.txt[/{ZCORE_ACCENT}]"
+        )
     else:
-        activate_cmd = ".venv\\Scripts\\activate" if sys.platform == "win32" else "source .venv/bin/activate"
-        console.print(f"  [dim]2.[/dim] [{ZCORE_ACCENT}]{activate_cmd}[/{ZCORE_ACCENT}]")
-    console.print(f"  [dim]3.[/dim] [{ZCORE_ACCENT}]zc startapp <module_name>[/{ZCORE_ACCENT}]")
+        activate_cmd = (
+            ".venv\\Scripts\\activate"
+            if sys.platform == "win32"
+            else "source .venv/bin/activate"
+        )
+        console.print(
+            f"  [dim]2.[/dim] [{ZCORE_ACCENT}]{activate_cmd}[/{ZCORE_ACCENT}]"
+        )
+    console.print(
+        f"  [dim]3.[/dim] [{ZCORE_ACCENT}]zc startapp <module_name>[/{ZCORE_ACCENT}]"
+    )
     console.print(f"  [dim]4.[/dim] [{ZCORE_ACCENT}]zc run[/{ZCORE_ACCENT}]\n")
 
 
@@ -191,7 +234,9 @@ def start_app(
     app_dir = base_dir / app_name.lower()
 
     if app_dir.exists():
-        console.print(f"[bold red]❌ Error:[/bold red] App folder '{app_dir}' already exists.")
+        console.print(
+            f"[bold red]❌ Error:[/bold red] App folder '{app_dir}' already exists."
+        )
         sys.exit(1)
 
     app_dir.mkdir(parents=True)
@@ -219,7 +264,9 @@ def start_app(
             if templated_components is not None
             else with_template
         )
-        files_to_create[filename] = raw_template.format(**context) if use_template else ""
+        files_to_create[filename] = (
+            raw_template.format(**context) if use_template else ""
+        )
 
     with console.status(
         f"[bold {ZCORE_PRIMARY}]Scaffolding ZCore domain module: '{model_name}'...[/bold {ZCORE_PRIMARY}]",
