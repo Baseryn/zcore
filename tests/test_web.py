@@ -777,8 +777,8 @@ async def test_router_lookup_projection_with_sqlalchemy_model() -> None:
 
 @pytest.mark.anyio
 async def test_router_lookup_projection_relationship_eager_loading() -> None:
-    from sqlalchemy.orm import relationship
     from sqlalchemy import ForeignKey
+    from sqlalchemy.orm import relationship
 
     table_suffix = uuid.uuid4().hex[:6]
 
