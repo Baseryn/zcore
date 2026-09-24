@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from zcore.cli import main
-from zcore.cli.commands import find_zcore_projects, is_zcore_project, run_server
+from zcore.cli.commands import find_zcore_projects, is_zcore_project
 from zcore.cli.ui import console, print_banner
 
 

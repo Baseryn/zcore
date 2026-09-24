@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 from pydantic_core import PydanticUndefined
 from rich.panel import Panel
