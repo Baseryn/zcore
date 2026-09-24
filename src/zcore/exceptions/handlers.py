@@ -10,10 +10,11 @@ from typing import Any
 
 import structlog
 from fastapi import Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from zcore.config import settings
 from zcore.exceptions.base import AppException
 from zcore.utils.helpers import json_dumps
 from zcore.web.response import ResponseWrapper
@@ -195,4 +196,54 @@ async def http_exception_handler(
         status_code=exc.status_code,
         content=response_payload.model_dump(),
         headers=exc.headers,
+    )
+
+
+async def response_validation_exception_handler(
+    request: Request, exc: ResponseValidationError
+) -> ZCoreJSONResponse:
+    """Handle internal endpoint response schema validation mismatches.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The captured ResponseValidationError.
+
+    Returns:
+        Structured 500 ZCoreJSONResponse detailing schema divergence.
+    """
+    is_debug = getattr(settings, "DEBUG", False)
+    raw_errors = exc.errors() if is_debug else []
+    sanitized_errors = [_sanitize_error_item(err) for err in raw_errors]
+
+    log.error(
+        "Response validation failed against declared schema",
+        status_code=500,
+        path=request.url.path,
+        method=request.method,
+        errors=sanitized_errors if is_debug else None,
+    )
+
+    message = (
+        "Internal server error: Response validation failed"
+        if is_debug
+        else "Internal server error"
+    )
+
+    meta: dict[str, Any] = {
+        "error_type": "ResponseValidationError",
+        "status_code": 500,
+    }
+    if is_debug and sanitized_errors:
+        meta["errors"] = sanitized_errors
+
+    response_payload = ResponseWrapper[None](
+        success=False,
+        message=message,
+        data=None,
+        meta=meta,
+    )
+
+    return ZCoreJSONResponse(
+        status_code=500,
+        content=response_payload.model_dump(),
     )
