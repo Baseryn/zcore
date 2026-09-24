@@ -14,7 +14,7 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, model_validator
 from sqlalchemy import String, and_, asc, cast, desc, inspect, not_, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
@@ -22,6 +22,7 @@ from sqlalchemy.sql import Select
 from zcore.context.context import ctx
 from zcore.db.setup import Base
 from zcore.exceptions.base import ForbiddenError, ValidationError
+from zcore.config import settings
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -94,7 +95,7 @@ class SearchRequest(BaseModel):
         include: Relationship attributes or dot-paths indicating database relationships
             to eager load. Defaults to an empty list.
         sort: Explicit ordering instructions. Defaults to an empty list.
-        size: The limit on retrieved records. Defaults to 20.
+        size: The limit on retrieved records.
         page: The target page offset index. Defaults to 1.
         cursor: Keyset pagination indicator. Defaults to None.
     """
@@ -102,9 +103,23 @@ class SearchRequest(BaseModel):
     filters: list[FilterItem] | None = []
     include: list[str] | None = []
     sort: list[SortItem] | None = []
-    size: int = Field(default=20, le=100)
+    size: int | None = None
     page: int = 1
     cursor: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_and_bound_size(self) -> "SearchRequest":
+        default_size = getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        max_size = getattr(settings, "PAGINATION_MAX_SIZE", 100)
+
+        if self.size is None:
+            self.size = default_size
+        elif self.size < 1:
+            self.size = 1
+        elif self.size > max_size:
+            self.size = max_size
+
+        return self
 
 
 class SearchEngine:
