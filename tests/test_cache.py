@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import zcore.cache.base as base_module
 from zcore.cache.base import BaseCache, _ensure_eviction_task, close_cache, init_cache
 from zcore.cache.ttllru_cache import TTLLRUCache, _active_caches
+from zcore.config import settings
 
 
 class SampleCachedModel(BaseModel):
@@ -22,7 +23,7 @@ class SampleCachedModel(BaseModel):
     [
         (5, 15, 10, None, "value_b"),
         (5, 15, 20, None, None),
-    ]
+    ],
 )
 def test_ttllru_eviction_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
@@ -30,7 +31,7 @@ def test_ttllru_eviction_and_cleanup(
     ttl_b: int,
     time_advancement: int,
     expected_a: str | None,
-    expected_b: str | None
+    expected_b: str | None,
 ) -> None:
     current_time = 1000.0
     monkeypatch.setattr("time.time", lambda: current_time)
@@ -64,12 +65,12 @@ def test_ttllru_eviction_and_cleanup(
     [
         (False, False),
         (True, True),
-    ]
+    ],
 )
 async def test_base_cache_redis_fallback(
     monkeypatch: pytest.MonkeyPatch,
     redis_healthy: bool,
-    simulate_exception: bool
+    simulate_exception: bool,
 ) -> None:
     cache = BaseCache[str](prefix="fallback_test")
 
@@ -96,12 +97,12 @@ async def test_base_cache_redis_fallback(
         ({"id": 101, "name": "ZCore"}, SampleCachedModel, SampleCachedModel),
         ({"user_id": 99}, None, dict),
         ("plain_string", None, str),
-    ]
+    ],
 )
 async def test_cache_deserialization_types(
     payload: Any,
     target_type: type[BaseModel] | None,
-    expected_cls: type[Any]
+    expected_cls: type[Any],
 ) -> None:
     cache = BaseCache[Any](prefix="typing_test")
     await cache.set("payload_key", payload, ttl=5)
@@ -305,3 +306,13 @@ async def test_close_cache_cancellation_suppression(monkeypatch: pytest.MonkeyPa
     assert base_module._eviction_task is None
     assert base_module._shared_redis_client is None
     mock_redis.aclose.assert_called_once()
+
+
+def test_dynamic_cache_configuration_bindings() -> None:
+    with patch.object(settings, "CACHE_LOCAL_MAXSIZE", 42), patch.object(settings, "CACHE_DEFAULT_TTL", 123):
+        local_cache = TTLLRUCache()
+        assert local_cache.maxsize == 42
+
+        base_cache = BaseCache[str](prefix="dynamic")
+        assert base_cache._local_cache.maxsize == 42
+        assert base_cache.default_ttl == 123
