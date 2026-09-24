@@ -12,6 +12,7 @@ import structlog
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from zcore.exceptions.base import AppException
 from zcore.utils.helpers import json_dumps
@@ -155,4 +156,43 @@ async def request_validation_exception_handler(
     return ZCoreJSONResponse(
         status_code=422,
         content=response_payload.model_dump(),
+    )
+
+
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> ZCoreJSONResponse:
+    """Handle standard Starlette and FastAPI `HTTPException` instances.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The captured HTTP exception.
+
+    Returns:
+        Structured ZCoreJSONResponse mapping the HTTP status code and detail.
+    """
+    message = str(exc.detail) if exc.detail else "An HTTP error occurred"
+
+    log.warning(
+        "HTTPException raised",
+        status_code=exc.status_code,
+        message=message,
+        path=request.url.path,
+        method=request.method,
+    )
+
+    response_payload = ResponseWrapper[None](
+        success=False,
+        message=message,
+        data=None,
+        meta={
+            "error_type": "HTTPException",
+            "status_code": exc.status_code,
+        },
+    )
+
+    return ZCoreJSONResponse(
+        status_code=exc.status_code,
+        content=response_payload.model_dump(),
+        headers=exc.headers,
     )
