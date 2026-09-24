@@ -19,10 +19,10 @@ from sqlalchemy import String, and_, asc, cast, desc, inspect, not_, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
+from zcore.config import settings
 from zcore.context.context import ctx
 from zcore.db.setup import Base
 from zcore.exceptions.base import ForbiddenError, ValidationError
-from zcore.config import settings
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -108,7 +108,7 @@ class SearchRequest(BaseModel):
     cursor: str | None = None
 
     @model_validator(mode="after")
-    def _validate_and_bound_size(self) -> "SearchRequest":
+    def _validate_and_bound_size(self) -> SearchRequest:
         default_size = getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
         max_size = getattr(settings, "PAGINATION_MAX_SIZE", 100)
 

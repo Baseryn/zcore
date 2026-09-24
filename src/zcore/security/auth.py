@@ -11,10 +11,10 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
 from zcore.cache import BaseCache
+from zcore.config import settings
 from zcore.context import ctx
 from zcore.exceptions import AuthError
 from zcore.security.security import Security
-from zcore.config import settings
 
 T = TypeVar("T", bound=BaseModel)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
