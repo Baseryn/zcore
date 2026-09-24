@@ -40,6 +40,8 @@ class LoggingSettings(BaseModel):
     log_sql_queries: bool = True
     slow_query_threshold_ms: float | None = None
     file_path: str | None = None
+    max_bytes: int = 10 * 1024 * 1024
+    backup_count: int = 5
     muted_loggers: list[str] = Field(
         default_factory=lambda: [
             "uvicorn",
@@ -55,29 +57,8 @@ class Settings(BaseSettings):
     """Core settings and environment variables configuration for the ZCore framework.
 
     This class parses configuration variables from both environment variables and
-    optional file-based sources (such as a `.env` file). It manages configuration for
-    the database engine, logging subsystems, authentication parameters, file storage paths,
-    timezone policies, and other core services.
-
-    Attributes:
-        DATABASE: Structured configuration model for database engine settings.
-        DATABASE_URL: Connection URI for the primary relational database.
-        MAX_OVERFLOW: Maximum number of connections allowed beyond the database pool size.
-        POOL_SIZE: The connection pool size for database connections.
-        DATABASE_TEST_URL: Connection URI for database testing and integration runs.
-        LOGGING: Structured configuration model for framework logging settings.
-        LOG_LEVEL: Fallback environment logging level string.
-        TIMEZONE: IANA standard timezone string used across the application.
-        AUTO_CONVERT_TIMEZONE: Boolean flag determining automatic API timezone conversions.
-        SECRET_KEY: Cryptographic secret key used for signing web tokens and hashes.
-        PROJECT_NAME: Name of the project.
-        ALGORITHM: Cryptographic algorithm utilized for signing JWTs.
-        ACCESS_TOKEN_EXPIRE_MINUTES: Expiry duration for authentication access tokens in minutes.
-        REFRESH_TOKEN_EXPIRE_DAYS: Expiry duration for refresh tokens in days.
-        STORAGE_PATH: Local filesystem base path reserved for target storage uploads.
-        STORAGE_URL_PREFIX: HTTP URL prefix mapped to exposed static assets.
-        REDIS_URL: Redis connection URI, or None if Redis is not used.
-        DEBUG: Boolean flag indicating whether the application is in debug mode.
+    optional file-based sources. It manages configuration for database, logging,
+    authentication, storage, timezones, pagination boundaries, caching, and stream capacities.
     """
 
     model_config = SettingsConfigDict(
@@ -101,6 +82,17 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    AUTH_CACHE_TTL: int = 300
+
+    PAGINATION_DEFAULT_SIZE: int = 20
+    PAGINATION_MAX_SIZE: int = 100
+    SEARCH_MAX_DEPTH: int = 3
+
+    CACHE_LOCAL_MAXSIZE: int = 1000
+    CACHE_DEFAULT_TTL: int = 3600
+    CACHE_EVICTION_INTERVAL: int = 60
+
+    STREAM_QUEUE_MAXSIZE: int = 100
 
     STORAGE_PATH: str = Field(
         default="./storage",
@@ -115,9 +107,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _sync_settings(self) -> "Settings":
-        if self.DATABASE_URL != "sqlite+aiosqlite:///zcore.db" and self.DATABASE.url == "sqlite+aiosqlite:///zcore.db":
+        if (
+            self.DATABASE_URL != "sqlite+aiosqlite:///zcore.db"
+            and self.DATABASE.url == "sqlite+aiosqlite:///zcore.db"
+        ):
             self.DATABASE.url = self.DATABASE_URL
-        elif self.DATABASE.url != "sqlite+aiosqlite:///zcore.db" and self.DATABASE_URL == "sqlite+aiosqlite:///zcore.db":
+        elif (
+            self.DATABASE.url != "sqlite+aiosqlite:///zcore.db"
+            and self.DATABASE_URL == "sqlite+aiosqlite:///zcore.db"
+        ):
             self.DATABASE_URL = self.DATABASE.url
 
         if self.POOL_SIZE != 5 and self.DATABASE.pool_size == 5:
@@ -142,8 +140,7 @@ def initialize_settings(settings_inst: Settings) -> None:
     """Register the settings instance in the IoC dependency injection container.
 
     Args:
-        settings_inst: An instance of `Settings` (or its subclasses)
-            to register into the global container.
+        settings_inst: An instance of `Settings` to register into the global container.
     """
     container.register_singleton(settings_inst.__class__, settings_inst)
     if settings_inst.__class__ is not Settings:
@@ -155,7 +152,6 @@ def get_settings(settings_class: type[T] = Settings) -> T:
 
     Args:
         settings_class: The class type of the settings to resolve.
-            Defaults to Settings.
 
     Returns:
         The resolved settings instance of type `T`.
