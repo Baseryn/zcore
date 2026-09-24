@@ -486,6 +486,39 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         await self.db.refresh(record)
         return record
 
+    async def restore_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+        """Restore multiple soft-deleted records using an atomic batch update.
+
+        Args:
+            ids: A list of primary key values of records to restore.
+
+        Returns:
+            A sequence of restored database model instances.
+        """
+        if not ids or not self._supports_soft_delete():
+            return []
+
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_update_returning = bool(getattr(dialect, "update_returning", False))
+
+        stmt = (
+            update(self.model)
+            .where(self.pk.in_(ids), getattr(self.model, "deleted_at").is_not(None))
+            .values(deleted_at=None)
+        )
+
+        if supports_update_returning:
+            stmt = stmt.returning(self.model)
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            return list(result.scalars().all())
+
+        await self.db.execute(stmt)
+        await self.db.flush()
+        query = select(self.model).where(self.pk.in_(ids))
+        res = await self.db.execute(query)
+        return list(res.scalars().all())
+
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
     """Mixin coordinating structured application search operations."""
 
