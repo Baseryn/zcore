@@ -108,8 +108,8 @@ def setup_logging(
 
         file_handler = RotatingFileHandler(
             cfg.file_path,
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
+            maxBytes=cfg.max_bytes,
+            backupCount=cfg.backup_count,
             encoding="utf-8",
         )
         file_handler.setFormatter(formatter)
