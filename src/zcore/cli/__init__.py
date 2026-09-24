@@ -218,10 +218,10 @@ def interactive_dashboard() -> None:
 
 
 def main() -> None:
-    """Parse arguments and execute CLI commands."""
+    """Parse arguments and execute CLI commands supporting transparent option forwarding."""
     try:
         parser = argparse.ArgumentParser(description="ZCore CLI Tool", prog="zc")
-        parser.add_argument("--version", action="store_true", help="Show the active ZCore Framework version")
+        parser.add_argument("--version", action="store_true", help="Show active ZCore Framework version")
 
         subparsers = parser.add_subparsers(dest="command", help="Available Framework Orchestration Commands")
 
@@ -236,17 +236,25 @@ def main() -> None:
         startapp_parser.add_argument("--test", action=argparse.BooleanOptionalAction, default=True, help="Generate test suite")
         startapp_parser.add_argument("-y", "--yes", action="store_true", help="Generate all standard architectural layers automatically")
 
-        subparsers.add_parser("run", help="Launches the local Uvicorn development server")
+        run_parser = subparsers.add_parser("run", help="Launches development/production server with cascading config")
+        run_parser.add_argument("app", nargs="?", type=str, default=None, help="Application import string (e.g. main:app)")
+        run_parser.add_argument("--host", type=str, default=None, help="Network interface to bind (overrides .env)")
+        run_parser.add_argument("--port", type=int, default=None, help="TCP port number (overrides .env)")
+        run_parser.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None, help="Enable/disable reload")
+        run_parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
+        run_parser.add_argument("--log-level", type=str, default=None, help="Log level verbosity")
+        run_parser.add_argument("--env-file", type=str, default=None, help="Path to custom environment file")
+
         subparsers.add_parser("gensecret", help="Generates a cryptographically secure 64-character SECRET_KEY")
 
         genenv_parser = subparsers.add_parser("genenv", help="Generates template .env based on Settings")
         genenv_parser.add_argument("-o", "--output", type=str, default=".env.example", help="Target output filepath")
         genenv_parser.add_argument("-f", "--force", action="store_true", help="Overwrite existing file")
 
-        args = parser.parse_args()
+        args, extra_args = parser.parse_known_args()
 
         if args.version:
-            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.1[/bold white]")
+            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.2[/bold white]")
             sys.exit(0)
 
         if args.command == "init":
@@ -262,7 +270,16 @@ def main() -> None:
                 prompt_startapp_interactive(app_name=args.name)
 
         elif args.command == "run":
-            run_server()
+            run_server(
+                app=args.app,
+                host=args.host,
+                port=args.port,
+                reload=args.reload,
+                workers=args.workers,
+                log_level=args.log_level,
+                env_file=args.env_file,
+                extra_args=extra_args,
+            )
         elif args.command == "gensecret":
             gen_secret()
         elif args.command == "genenv":
