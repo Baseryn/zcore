@@ -14,6 +14,7 @@ from zcore.cache import BaseCache
 from zcore.context import ctx
 from zcore.exceptions import AuthError
 from zcore.security.security import Security
+from zcore.config import settings
 
 T = TypeVar("T", bound=BaseModel)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -32,7 +33,7 @@ class BaseAuth(Generic[T]):
         identity_claim: str = "sub",
         token_type: str = "access",
         cache_prefix: str = "auth",
-        cache_ttl: int = 300,
+        cache_ttl: int | None = None,
     ) -> None:
         """Initialize the BaseAuth instance.
 
@@ -41,13 +42,15 @@ class BaseAuth(Generic[T]):
             identity_claim: The claim attribute denoting user identity. Defaults to "sub".
             token_type: Target validated string within claims. Defaults to "access".
             cache_prefix: Cache prefix namespace. Defaults to "auth".
-            cache_ttl: Expiration lifespan of cache items. Defaults to 300.
+            cache_ttl: Expiration lifespan of cache items in seconds. If None, resolves from `Settings.AUTH_CACHE_TTL`. Defaults to None.
         """
         self.user_schema = user_schema
         self.identity_claim = identity_claim
         self.token_type = token_type
-        self.cache = BaseCache(prefix=cache_prefix)
-        self.cache_ttl = cache_ttl
+        self.cache_ttl = cache_ttl if cache_ttl is not None else getattr(
+            settings, "AUTH_CACHE_TTL", 300
+        )
+        self.cache = BaseCache(prefix=cache_prefix, default_ttl=self.cache_ttl)
 
     async def fetch_user(self, identity: str) -> Any:
         """Fetch the active user model from persistent storage.
