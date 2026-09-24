@@ -110,28 +110,6 @@ class StreamManager:
     async def subscribe(self, user_id: uuid.UUID) -> asyncio.Queue[Any]:
         """Subscribe a user, returning a bounded async listener queue.
 
-        Initializes background Redis listeners if this is the first active subscription
-        for a user in this node.
-
-        Args:
-            user_id: The target user identifier key.
-
-        Returns:
-            A bounded asyncio Queue configured to receive events.
-        """
-        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=100)
-        async with self._lock:
-            if user_id not in self.users_queues:
-                self.users_queues[user_id] = []
-                client = self.redis_client
-                if client and (self._pubsub_task is None or self._pubsub_task.done()):
-                    await self.start_listening()
-            self.users_queues[user_id].append(queue)
-        return queue
-
-    async def subscribe(self, user_id: uuid.UUID) -> asyncio.Queue[Any]:
-        """Subscribe a user, returning a bounded async listener queue.
-
         Args:
             user_id: The target user identifier key.
 
@@ -148,6 +126,30 @@ class StreamManager:
                     await self.start_listening()
             self.users_queues[user_id].append(queue)
         return queue
+
+    async def unsubscribe(self, user_id: uuid.UUID, queue: asyncio.Queue[Any]) -> None:
+        """Unsubscribe a user's listener queue.
+
+        Pops the active queue, and shuts down the background task if no active
+        listener queues remain in the system.
+
+        Args:
+            user_id: The target user identifier key.
+            queue: The active asyncio Queue to unsubscribe.
+        """
+        async with self._lock:
+            if user_id in self.users_queues:
+                if queue in self.users_queues[user_id]:
+                    self.users_queues[user_id].remove(queue)
+                if not self.users_queues[user_id]:
+                    del self.users_queues[user_id]
+            if (
+                not self.users_queues
+                and self._pubsub_task
+                and not self._pubsub_task.done()
+            ):
+                self._pubsub_task.cancel()
+                self._pubsub_task = None
 
     @asynccontextmanager
     async def subscription(
