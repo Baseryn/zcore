@@ -58,6 +58,7 @@ class CustomDepthEntity(Base):
 @pytest.fixture(autouse=True)
 def mock_restricted_fields() -> Generator[None, None, None]:
     from zcore.context.context import ctx
+
     ctx.restricted_fields = {"password", "SearchUser.password"}
     yield
     ctx.restricted_fields = None
@@ -80,7 +81,7 @@ async def seed_data(db_session: Any) -> None:
         password="foo",
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         is_active=True,
-        uid=uuid_pkg.UUID("11111111-1111-1111-1111-111111111111")
+        uid=uuid_pkg.UUID("11111111-1111-1111-1111-111111111111"),
     )
     user2 = SearchUser(
         id=2,
@@ -88,7 +89,7 @@ async def seed_data(db_session: Any) -> None:
         password="bar",
         created_at=datetime(2026, 1, 2, 12, 0, 0),
         is_active=False,
-        uid=uuid_pkg.UUID("22222222-2222-2222-2222-222222222222")
+        uid=uuid_pkg.UUID("22222222-2222-2222-2222-222222222222"),
     )
     user3 = SearchUser(
         id=3,
@@ -96,7 +97,7 @@ async def seed_data(db_session: Any) -> None:
         password="baz",
         created_at=datetime(2026, 1, 3, 12, 0, 0),
         is_active=True,
-        uid=uuid_pkg.UUID("33333333-3333-3333-3333-333333333333")
+        uid=uuid_pkg.UUID("33333333-3333-3333-3333-333333333333"),
     )
     db_session.add_all([user1, user2, user3])
 
@@ -121,9 +122,26 @@ async def seed_data(db_session: Any) -> None:
         ("eq", "guest", [3]),
         ("ne", "guest", [1, 2]),
         ("gt", 1, [2, 3]),
+        ("ge", 2, [2, 3]),
+        ("lt", 2, [1]),
+        ("le", 2, [1, 2]),
         ("ilike", "%", [1]),
+        ("not_ilike", "%", [2, 3]),
         ("ilike", "special", [2]),
-    ]
+        ("not_ilike", "special", [1, 3]),
+        ("like", "admin%", [1]),
+        ("not_like", "admin%", [2, 3]),
+        ("contains", "min", [1]),
+        ("not_contains", "min", [2, 3]),
+        ("startswith", "adm", [1]),
+        ("not_startswith", "adm", [2, 3]),
+        ("endswith", "special", [2]),
+        ("not_endswith", "special", [1, 3]),
+        ("in", [1, 3], [1, 3]),
+        ("not_in", [1, 3], [2]),
+        ("between", [1, 2], [1, 2]),
+        ("not_between", [1, 2], [3]),
+    ],
 )
 @pytest.mark.anyio
 async def test_search_all_operators(
@@ -131,10 +149,10 @@ async def test_search_all_operators(
     seed_data: None,
     op: str,
     val: Any,
-    expected_ids: list[int]
+    expected_ids: list[int],
 ) -> None:
     engine = SearchEngine(SearchUser)
-    filter_item = FilterItem(field="id" if isinstance(val, int) else "username", op=op, value=val)
+    filter_item = FilterItem(field="id" if isinstance(val, int) or (isinstance(val, list) and isinstance(val[0], int)) else "username", op=op, value=val)
     request = SearchRequest(filters=[filter_item], size=10)
     query = engine.build_base_query(request)
     result = await db_session.execute(query)
@@ -144,67 +162,46 @@ async def test_search_all_operators(
 
 
 @pytest.mark.anyio
-async def test_search_startswith_operator(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchUser)
+async def test_search_is_null_and_is_not_null(db_session: Any, seed_data: None) -> None:
+    engine = SearchEngine(SearchProfile)
 
-    req_adm = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="adm")])
-    res_adm = await db_session.execute(engine.build_base_query(req_adm))
-    assert {u.id for u in res_adm.scalars().all()} == {1}
+    req_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=True)])
+    res_null = await db_session.execute(engine.build_base_query(req_null))
+    assert {p.id for p in res_null.scalars().all()} == {2}
 
-    req_user = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="user")])
-    res_user = await db_session.execute(engine.build_base_query(req_user))
-    assert {u.id for u in res_user.scalars().all()} == {2}
+    req_not_null = SearchRequest(filters=[FilterItem(field="bio", op="is_not_null", value=True)])
+    res_not_null = await db_session.execute(engine.build_base_query(req_not_null))
+    assert {p.id for p in res_not_null.scalars().all()} == {1, 3}
 
-    req_none = SearchRequest(filters=[FilterItem(field="username", op="startswith", value="nonexistent")])
-    res_none = await db_session.execute(engine.build_base_query(req_none))
-    assert len(res_none.scalars().all()) == 0
-
-
-@pytest.mark.anyio
-async def test_search_endswith_operator(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchUser)
-
-    req_percent = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="%")])
-    res_percent = await db_session.execute(engine.build_base_query(req_percent))
-    assert {u.id for u in res_percent.scalars().all()} == {1}
-
-    req_special = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="special")])
-    res_special = await db_session.execute(engine.build_base_query(req_special))
-    assert {u.id for u in res_special.scalars().all()} == {2}
-
-    req_st = SearchRequest(filters=[FilterItem(field="username", op="endswith", value="st")])
-    res_st = await db_session.execute(engine.build_base_query(req_st))
-    assert {u.id for u in res_st.scalars().all()} == {3}
+    req_not_null_explicit = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=False)])
+    res_not_null_explicit = await db_session.execute(engine.build_base_query(req_not_null_explicit))
+    assert {p.id for p in res_not_null_explicit.scalars().all()} == {1, 3}
 
 
 @pytest.mark.anyio
-async def test_search_contains_operator(db_session: Any, seed_data: None) -> None:
+async def test_search_logical_not_group_operator(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
 
-    req_min = SearchRequest(filters=[FilterItem(field="username", op="contains", value="min")])
-    res_min = await db_session.execute(engine.build_base_query(req_min))
-    assert {u.id for u in res_min.scalars().all()} == {1}
+    req_not_items = SearchRequest(
+        filters=[
+            FilterItem(
+                op="not",
+                items=[
+                    FilterItem(field="is_active", op="eq", value=True),
+                ],
+            )
+        ]
+    )
+    res_not_items = await db_session.execute(engine.build_base_query(req_not_items))
+    assert {u.id for u in res_not_items.scalars().all()} == {2}
 
-    req_spec = SearchRequest(filters=[FilterItem(field="username", op="contains", value="_spec")])
-    res_spec = await db_session.execute(engine.build_base_query(req_spec))
-    assert {u.id for u in res_spec.scalars().all()} == {2}
-
-    req_ues = SearchRequest(filters=[FilterItem(field="username", op="contains", value="ues")])
-    res_ues = await db_session.execute(engine.build_base_query(req_ues))
-    assert {u.id for u in res_ues.scalars().all()} == {3}
-
-
-@pytest.mark.anyio
-async def test_search_between_operator_numbers(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchUser)
-
-    req_1_2 = SearchRequest(filters=[FilterItem(field="id", op="between", value=[1, 2])])
-    res_1_2 = await db_session.execute(engine.build_base_query(req_1_2))
-    assert {u.id for u in res_1_2.scalars().all()} == {1, 2}
-
-    req_2_3 = SearchRequest(filters=[FilterItem(field="id", op="between", value=[2, 3])])
-    res_2_3 = await db_session.execute(engine.build_base_query(req_2_3))
-    assert {u.id for u in res_2_3.scalars().all()} == {2, 3}
+    req_not_field = SearchRequest(
+        filters=[
+            FilterItem(op="not", field="username", value="guest")
+        ]
+    )
+    res_not_field = await db_session.execute(engine.build_base_query(req_not_field))
+    assert {u.id for u in res_not_field.scalars().all()} == {1, 2}
 
 
 @pytest.mark.anyio
@@ -216,12 +213,24 @@ async def test_search_between_operator_datetime(db_session: Any, seed_data: None
             FilterItem(
                 field="created_at",
                 op="between",
-                value=["2026-01-01T00:00:00", "2026-01-02T23:59:59"]
+                value=["2026-01-01T00:00:00", "2026-01-02T23:59:59"],
             )
         ]
     )
     res_dt = await db_session.execute(engine.build_base_query(req_dt))
     assert {u.id for u in res_dt.scalars().all()} == {1, 2}
+
+    req_not_dt = SearchRequest(
+        filters=[
+            FilterItem(
+                field="created_at",
+                op="not_between",
+                value=["2026-01-01T00:00:00", "2026-01-02T23:59:59"],
+            )
+        ]
+    )
+    res_not_dt = await db_session.execute(engine.build_base_query(req_not_dt))
+    assert {u.id for u in res_not_dt.scalars().all()} == {3}
 
 
 @pytest.mark.parametrize(
@@ -231,7 +240,7 @@ async def test_search_between_operator_datetime(db_session: Any, seed_data: None
         [1],
         [1, 2, 3],
         None,
-    ]
+    ],
 )
 def test_search_between_validation_error(invalid_val: Any) -> None:
     engine = SearchEngine(SearchUser)
@@ -254,7 +263,7 @@ def make_nested_filter(depth: int, field_name: str = "username") -> FilterItem:
         (2, False),
         (3, False),
         (4, True),
-    ]
+    ],
 )
 def test_search_max_filter_depth_default(depth: int, should_raise: bool) -> None:
     engine = SearchEngine(SearchUser)
@@ -276,7 +285,7 @@ def test_search_max_filter_depth_default(depth: int, should_raise: bool) -> None
         (4, False),
         (5, False),
         (6, True),
-    ]
+    ],
 )
 def test_search_custom_model_max_depth(depth: int, should_raise: bool) -> None:
     engine = SearchEngine(CustomDepthEntity)
@@ -297,7 +306,7 @@ def test_search_custom_model_max_depth(depth: int, should_raise: bool) -> None:
         "password",
         "PASSWORD",
         "PaSsWoRd",
-    ]
+    ],
 )
 def test_search_restricted_field_bypass(field_variant: str) -> None:
     engine = SearchEngine(SearchUser)
@@ -319,12 +328,12 @@ def test_search_restricted_field_bypass(field_variant: str) -> None:
         (["post.profile.user"], None, ""),
         (["post.profile.non_existent"], ValidationError, "Invalid include relation path"),
         (["post.profile.user.extra"], ValidationError, "exceeds the maximum limit of 3"),
-    ]
+    ],
 )
 def test_search_include_depth_and_relation(
     paths: list[str],
     expected_error: type[Exception] | None,
-    error_message: str
+    error_message: str,
 ) -> None:
     engine = SearchEngine(SearchComment)
     request = SearchRequest(include=paths, size=10)
@@ -338,44 +347,6 @@ def test_search_include_depth_and_relation(
 
 
 @pytest.mark.anyio
-async def test_search_lt_le_ge(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchUser)
-
-    req_lt = SearchRequest(filters=[FilterItem(field="id", op="lt", value=2)])
-    res_lt = await db_session.execute(engine.build_base_query(req_lt))
-    assert {u.id for u in res_lt.scalars().all()} == {1}
-
-    req_le = SearchRequest(filters=[FilterItem(field="id", op="le", value=2)])
-    res_le = await db_session.execute(engine.build_base_query(req_le))
-    assert {u.id for u in res_le.scalars().all()} == {1, 2}
-
-    req_ge = SearchRequest(filters=[FilterItem(field="id", op="ge", value=2)])
-    res_ge = await db_session.execute(engine.build_base_query(req_ge))
-    assert {u.id for u in res_ge.scalars().all()} == {2, 3}
-
-
-@pytest.mark.anyio
-async def test_search_in_operator(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchUser)
-    req = SearchRequest(filters=[FilterItem(field="id", op="in", value=[1, 3])])
-    res = await db_session.execute(engine.build_base_query(req))
-    assert {u.id for u in res.scalars().all()} == {1, 3}
-
-
-@pytest.mark.anyio
-async def test_search_is_null_operator(db_session: Any, seed_data: None) -> None:
-    engine = SearchEngine(SearchProfile)
-
-    req_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=True)])
-    res_null = await db_session.execute(engine.build_base_query(req_null))
-    assert {p.id for p in res_null.scalars().all()} == {2}
-
-    req_not_null = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=False)])
-    res_not_null = await db_session.execute(engine.build_base_query(req_not_null))
-    assert {p.id for p in res_not_null.scalars().all()} == {1, 3}
-
-
-@pytest.mark.anyio
 async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> None:
     user4 = SearchUser(
         id=4,
@@ -383,7 +354,7 @@ async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> Non
         password="qux",
         created_at=datetime(2026, 1, 4, 12, 0, 0),
         is_active=True,
-        uid=uuid_pkg.UUID("44444444-4444-4444-4444-444444444444")
+        uid=uuid_pkg.UUID("44444444-4444-4444-4444-444444444444"),
     )
     db_session.add(user4)
     await db_session.flush()
@@ -451,6 +422,7 @@ async def test_search_custom_handler(db_session: Any, seed_data: None) -> None:
 
 def test_search_nested_restricted_field() -> None:
     from zcore.context.context import ctx
+
     ctx.restricted_fields = {"post.profile.user.password"}
     engine = SearchEngine(SearchComment)
     req = SearchRequest(filters=[FilterItem(field="post.profile.user.password", op="eq", value="foo")])
@@ -461,6 +433,7 @@ def test_search_nested_restricted_field() -> None:
 
 def test_search_restricted_relationship_path() -> None:
     from zcore.context.context import ctx
+
     ctx.restricted_fields = {"SearchComment.post", "post"}
     engine = SearchEngine(SearchComment)
     req = SearchRequest(filters=[FilterItem(field="post.title", op="eq", value="anything")])
@@ -508,10 +481,10 @@ async def test_search_complex_combined_logical_filters(db_session: Any, seed_dat
                 op="and",
                 items=[
                     FilterItem(field="id", op="eq", value=3),
-                    FilterItem(field="username", op="eq", value="guest")
-                ]
-            )
-        ]
+                    FilterItem(field="username", op="eq", value="guest"),
+                ],
+            ),
+        ],
     )
     req = SearchRequest(filters=[filter_item])
     res = await db_session.execute(engine.build_base_query(req))
