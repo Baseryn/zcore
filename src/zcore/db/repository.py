@@ -458,6 +458,33 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                 await self.db.flush()
             return records
 
+    async def restore(self, target: ModelType | Any) -> ModelType | None:
+        """Restore a previously soft-deleted record.
+
+        Args:
+            target: The model instance or primary key identifier of the record to restore.
+
+        Returns:
+            The restored database model instance, or None if the record was not found or unsupported.
+        """
+        if not self._supports_soft_delete():
+            return None
+
+        if isinstance(target, self.model):
+            record = target
+        else:
+            query = select(self.model).where(
+                getattr(self.model, self.pk_name) == target
+            )
+            result = await self.db.execute(query)
+            record = result.scalars().first()
+            if not record:
+                return None
+
+        record.restore()
+        await self.db.flush()
+        await self.db.refresh(record)
+        return record
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
     """Mixin coordinating structured application search operations."""
