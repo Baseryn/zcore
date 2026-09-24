@@ -458,6 +458,32 @@ async def test_service_search_hooks() -> None:
 
 
 @pytest.mark.anyio
+async def test_service_search_with_fields_and_options() -> None:
+    mock_repo = AsyncMock()
+    records = [ServiceTestModel(id=1, name="Lookup1")]
+    mock_repo.search.return_value = records
+
+    service = HookTrackingService(ServiceTestModel, mock_repo)
+    search_request = SearchRequest(filters=[])
+    target_fields = [ServiceTestModel.id, ServiceTestModel.name]
+    target_options = [MagicMock()]
+
+    results = await service.search(
+        search_in=search_request,
+        fields=target_fields,
+        options=target_options,
+    )
+
+    mock_repo.search.assert_called_once_with(
+        search_request,
+        pagination=None,
+        fields=target_fields,
+        options=target_options,
+    )
+    assert results[0].name == "Lookup1_SEARCHED"
+
+
+@pytest.mark.anyio
 async def test_service_search_pagination() -> None:
     mock_repo = AsyncMock()
     records = [ServiceTestModel(id=1, name="Found1"), ServiceTestModel(id=2, name="Found2")]
