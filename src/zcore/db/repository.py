@@ -427,7 +427,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             deletion_time = now()
             stmt = (
                 update(self.model)
-                .where(self.pk.in_(ids), getattr(self.model, "deleted_at").is_(None))
+                .where(self.pk.in_(ids), self.model.deleted_at.is_(None))
                 .values(deleted_at=deletion_time)
             )
 
@@ -503,7 +503,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         stmt = (
             update(self.model)
-            .where(self.pk.in_(ids), getattr(self.model, "deleted_at").is_not(None))
+            .where(self.pk.in_(ids), self.model.deleted_at.is_not(None))
             .values(deleted_at=None)
         )
 

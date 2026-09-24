@@ -294,7 +294,7 @@ async def test_soft_delete_service_orchestration(db_session: Any) -> None:
     assert "pre_restore" in service.hooks_called
     assert "post_restore" in service.hooks_called
 
-    deleted_hard = await service.delete(item2.id, force=True)
+    await service.delete(item2.id, force=True)
     assert "pre_delete_force_True" in service.hooks_called
     assert "post_delete_force_True" in service.hooks_called
 
