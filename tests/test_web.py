@@ -359,7 +359,7 @@ async def test_router_lookup_endpoint_execution(monkeypatch: pytest.MonkeyPatch)
         update_schema = DummyUpdate
         schema_out = DummyOut
         lookup_schema = DummyLookup
-        allowed_lookup_fields = {"id", "name"}
+        allowed_lookup_fields: ClassVar[set[str]] = {"id", "name"}
         max_lookup_size = 50
         service = MockFullService
         prefix = "/lookup-test"
