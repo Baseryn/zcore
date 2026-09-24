@@ -128,7 +128,7 @@ class ZCoreAPIRoute(APIRoute):
                     "post": "create",
                     "get": "view",
                     "put": "update",
-                    "patch": "patch",
+                    "patch": "update",
                     "delete": "delete",
                 }
                 current_method = request.method.lower()
