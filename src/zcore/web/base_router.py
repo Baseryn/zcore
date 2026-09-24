@@ -1,7 +1,7 @@
 """Automated Web Router Scaffolding.
 
 This module provides the generic `BaseRouter` interface, which scaffolds
-standard security-aware CRUD endpoints (POST, GET, GET_ALL, SEARCH, UPDATE, PATCH, DELETE)
+standard security-aware CRUD and lookup endpoints (POST, GET, GET_ALL, SEARCH, LOOKUP, UPDATE, PATCH, DELETE)
 and integrates them with services, schemas, dependency requirements, and pagination handlers,
 with clean declarative syntax, primary key auto-detection, and weighted route specificity sorting.
 """
@@ -16,6 +16,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
 from zcore.db.search import SearchRequest
+from zcore.exceptions.base import ValidationError
 from zcore.kernel.di import Injector
 from zcore.security.permissions import HasScopes
 from zcore.service.base import BaseService
@@ -36,6 +37,7 @@ class RouteKey(StrEnum):
     GET = "GET"
     GET_ALL = "GET_ALL"
     SEARCH = "SEARCH"
+    LOOKUP = "LOOKUP"
     UPDATE = "UPDATE"
     PATCH = "PATCH"
     DELETE = "DELETE"
@@ -44,7 +46,7 @@ class RouteKey(StrEnum):
 class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     """Declarative web router orchestrator.
 
-    Automatically maps CRUD operations to matching database model dependencies and handles
+    Automatically maps CRUD and lookup operations to matching database model dependencies and handles
     dependency injections, schema validations, dynamic primary key route resolution,
     and hierarchical route ordering based on path specificity.
 
@@ -53,6 +55,9 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         create_schema: Schema class for validating entity creations.
         update_schema: Schema class for validating entity updates.
         schema_out: Schema class representing responses.
+        lookup_schema: Minimal schema class representing relational reference lookups.
+        allowed_lookup_fields: Explicit whitelist of filterable/sortable fields for lookup queries.
+        max_lookup_size: Maximum records threshold allowed in lookup responses.
         service: Business service callable class.
         pk_type: Optional explicit primary key type. If None, auto-resolved from model metadata.
         prefix: Path prefix representing the route.
@@ -67,6 +72,9 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     create_schema: type[CreateSchemaType] | type[BaseModel] | None = None
     update_schema: type[UpdateSchemaType] | type[BaseModel] | None = None
     schema_out: type[BaseModel] | None = None
+    lookup_schema: type[BaseModel] | None = None
+    allowed_lookup_fields: set[str] | None = None
+    max_lookup_size: int = 100
     service: Any = None
     pk_type: type[Any] | None = None
 
@@ -221,6 +229,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             RouteKey.GET: self.model.actions().VIEW,
             RouteKey.GET_ALL: self.model.actions().LISTVIEW,
             RouteKey.SEARCH: self.model.actions().LISTVIEW,
+            RouteKey.LOOKUP: self.model.actions().LOOKUP,
             RouteKey.UPDATE: self.model.actions().UPDATE,
             RouteKey.PATCH: self.model.actions().UPDATE,
             RouteKey.DELETE: self.model.actions().DELETE,
@@ -257,6 +266,53 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
 
         dependencies = self.get_route_dependencies(route_key, action)
         return self._normalize_dependencies(dependencies)
+
+    def _get_effective_lookup_fields(self) -> set[str]:
+        """Resolve the effective whitelist of column fields for lookup queries.
+
+        Returns:
+            A set of allowed field names extracted from explicit configurations or the lookup schema.
+        """
+        if self.allowed_lookup_fields is not None:
+            return set(self.allowed_lookup_fields)
+
+        if self.lookup_schema is not None and hasattr(self.lookup_schema, "model_fields"):
+            return set(self.lookup_schema.model_fields.keys())
+
+        return set()
+
+    def _validate_lookup_request(
+        self, search_in: SearchRequest, allowed_fields: set[str]
+    ) -> None:
+        """Validate that incoming lookup filters and sorting parameters conform to allowed fields.
+
+        Args:
+            search_in: Client-supplied SearchRequest.
+            allowed_fields: Whitelist of allowed field names.
+
+        Raises:
+            ValidationError: If an unapproved field is targeted by filters or sorting rules.
+        """
+        if not allowed_fields:
+            return
+
+        def _check_filters(items: list[Any] | None) -> None:
+            for f in items or []:
+                if f.field and f.field.split(".")[0] not in allowed_fields:
+                    raise ValidationError(
+                        message=f"Field '{f.field}' is not permitted in lookup queries."
+                    )
+                if f.items:
+                    _check_filters(f.items)
+
+        _check_filters(search_in.filters)
+
+        if search_in.sort:
+            for s in search_in.sort:
+                if s.field.split(".")[0] not in allowed_fields:
+                    raise ValidationError(
+                        message=f"Sort field '{s.field}' is not permitted in lookup queries."
+                    )
 
     def _sort_routes(self) -> None:
         """Sort routes using hierarchical specificity scoring to avoid path shadowing."""
@@ -375,6 +431,24 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 if self.schema_out
                 else ResponseWrapper,
                 openapi_extra=self._get_openapi_extra(RouteKey.SEARCH),
+            )
+
+        if RouteKey.LOOKUP not in self.exclude and self.lookup_schema is not None:
+
+            async def _lookup_endpoint(
+                search_in: SearchRequest,
+                service_inst: BaseService = service_dependency,
+            ) -> ResponseWrapper:
+                return await self.lookup_endpoint(search_in, service_inst)
+
+            self.router.add_api_route(
+                path="/lookup",
+                endpoint=_lookup_endpoint,
+                methods=["POST"],
+                dependencies=self._get_route_dependencies(RouteKey.LOOKUP),
+                status_code=status.HTTP_200_OK,
+                response_model=ResponseWrapper[list[self.lookup_schema]],
+                openapi_extra=self._get_openapi_extra(RouteKey.LOOKUP),
             )
 
         if RouteKey.UPDATE not in self.exclude:
@@ -513,6 +587,51 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 pagination = PageNumberParams(page=search_in.page, size=search_in.size)
 
         result = await service.search(search_in, pagination)
+        from zcore.db.pagination import PaginatedResult
+
+        if isinstance(result, PaginatedResult):
+            return ResponseWrapper(data=result.data, meta=result.meta)
+        return ResponseWrapper(data=result)
+
+    async def lookup_endpoint(
+        self, search_in: SearchRequest, service: BaseService
+    ) -> ResponseWrapper:
+        """Execute lightweight, field-restricted relational lookup queries.
+
+        Args:
+            search_in: Filter criteria and pagination limits.
+            service: Active business service instance.
+
+        Returns:
+            Optimized, projected entity records wrapped in a ResponseWrapper.
+        """
+        allowed_fields = self._get_effective_lookup_fields()
+        self._validate_lookup_request(search_in, allowed_fields)
+
+        effective_size = min(search_in.size or 20, self.max_lookup_size)
+        search_in.size = effective_size
+
+        load_fields = []
+        if allowed_fields and self.model:
+            for field_name in allowed_fields:
+                col = getattr(self.model, field_name, None)
+                if col is not None:
+                    load_fields.append(col)
+
+        pagination = None
+        if self.pagination_class:
+            from zcore.db.pagination import CursorParams, PageNumberParams
+
+            if self.pagination_class.params_class == CursorParams:
+                pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
+            else:
+                pagination = PageNumberParams(page=search_in.page, size=search_in.size)
+
+        result = await service.search(
+            search_in,
+            pagination=pagination,
+            fields=load_fields if load_fields else None,
+        )
         from zcore.db.pagination import PaginatedResult
 
         if isinstance(result, PaginatedResult):
