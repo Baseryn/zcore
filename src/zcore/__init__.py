@@ -27,6 +27,14 @@ if TYPE_CHECKING:
     from zcore.db.setup import Actions, Base, SessionDep, db_manager, get_db
     from zcore.db.soft_delete import SoftDeleteMixin
     from zcore.db.uow import UnitOfWork
+    from zcore.exceptions import (
+        app_exception_handler,
+        http_exception_handler,
+        register_exception_handlers,
+        request_validation_exception_handler,
+        response_validation_exception_handler,
+        unhandled_exception_handler,
+    )
     from zcore.kernel.di import (
         Inject,
         Injector,
@@ -75,6 +83,12 @@ __all__ = [
     "DatabaseSettings",
     "EventDispatcher",
     "HasScopes",
+    "app_exception_handler",
+    "http_exception_handler",
+    "register_exception_handlers",
+    "request_validation_exception_handler",
+    "response_validation_exception_handler",
+    "unhandled_exception_handler",
     "Inject",
     "Injector",
     "IoCContainer",
@@ -375,5 +389,15 @@ def __getattr__(name: str) -> Any:
         from zcore.utils.helpers import CustomJSONEncoder
 
         return CustomJSONEncoder
-
+    if name in (
+        "app_exception_handler",
+        "http_exception_handler",
+        "register_exception_handlers",
+        "request_validation_exception_handler",
+        "response_validation_exception_handler",
+        "unhandled_exception_handler",
+    ):
+        import zcore.exceptions.handlers as handlers_module
+        return getattr(handlers_module, name)
+    
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
