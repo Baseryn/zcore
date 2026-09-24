@@ -1,15 +1,15 @@
-"""Structured Exception Handlers.
+"""Structured Exception Handlers and Unified Registration.
 
-This module maps custom application exceptions (`AppException`) to standardized API JSON responses.
-It captures diagnostics, warning contexts, and metadata, formatting them using the system
-response wrapper envelope prior to transmission.
+This module provides explicit exception handlers that normalize internal exceptions,
+Pydantic validation errors, Starlette/FastAPI HTTP exceptions, and unhandled errors
+into the unified ZCore `ResponseWrapper` envelope.
 """
 
 from collections.abc import Sequence
 from typing import Any
 
 import structlog
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -247,3 +247,85 @@ async def response_validation_exception_handler(
         status_code=500,
         content=response_payload.model_dump(),
     )
+
+
+async def unhandled_exception_handler(
+    request: Request, exc: Exception
+) -> ZCoreJSONResponse:
+    """Catch-all fallback handler for uncaught runtime exceptions.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The unhandled runtime exception instance.
+
+    Returns:
+        Structured 500 ZCoreJSONResponse with safe diagnostic messaging.
+    """
+    is_debug = getattr(settings, "DEBUG", False)
+
+    log.exception(
+        "Unhandled server exception intercepted",
+        error=str(exc),
+        error_type=type(exc).__name__,
+        path=request.url.path,
+        method=request.method,
+    )
+
+    message = (
+        f"Internal server error: {exc!s}" if is_debug else "Internal server error"
+    )
+
+    meta: dict[str, Any] = {
+        "error_type": type(exc).__name__,
+        "status_code": 500,
+    }
+
+    response_payload = ResponseWrapper[None](
+        success=False,
+        message=message,
+        data=None,
+        meta=meta,
+    )
+
+    return ZCoreJSONResponse(
+        status_code=500,
+        content=response_payload.model_dump(),
+    )
+
+
+def register_exception_handlers(
+    app: FastAPI,
+    include_app_exceptions: bool = True,
+    include_validation_exceptions: bool = True,
+    include_http_exceptions: bool = True,
+    include_response_validation_exceptions: bool = True,
+    include_unhandled_exceptions: bool = True,
+) -> None:
+    """Explicitly attach standardized ZCore exception handlers to a FastAPI application.
+
+    Args:
+        app: The target FastAPI application instance.
+        include_app_exceptions: Register handler for custom domain `AppException`. Defaults to True.
+        include_validation_exceptions: Register handler for `RequestValidationError`. Defaults to True.
+        include_http_exceptions: Register handler for Starlette/FastAPI `HTTPException`. Defaults to True.
+        include_response_validation_exceptions: Register handler for `ResponseValidationError`. Defaults to True.
+        include_unhandled_exceptions: Register catch-all handler for unhandled `Exception`. Defaults to True.
+    """
+    if include_app_exceptions:
+        app.add_exception_handler(AppException, app_exception_handler)
+
+    if include_validation_exceptions:
+        app.add_exception_handler(
+            RequestValidationError, request_validation_exception_handler
+        )
+
+    if include_http_exceptions:
+        app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+
+    if include_response_validation_exceptions:
+        app.add_exception_handler(
+            ResponseValidationError, response_validation_exception_handler
+        )
+
+    if include_unhandled_exceptions:
+        app.add_exception_handler(Exception, unhandled_exception_handler)
