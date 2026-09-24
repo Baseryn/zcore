@@ -145,7 +145,11 @@ class SearchEngine:
         self.model = model
         self.mapper = inspect(model)
         self.custom_handlers: dict[str, Callable[[Any], Any]] = {}
-        self.max_depth: int = getattr(model, "__max_search_depth__", 3)
+        self.max_depth: int = getattr(
+            model,
+            "__max_search_depth__",
+            getattr(settings, "SEARCH_MAX_DEPTH", 3),
+        )
 
     def register_handler(
         self, field_name: str, handler: Callable[[Any], Any]
