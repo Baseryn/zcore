@@ -5,10 +5,12 @@ It captures diagnostics, warning contexts, and metadata, formatting them using t
 response wrapper envelope prior to transmission.
 """
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import structlog
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from zcore.exceptions.base import AppException
@@ -106,5 +108,51 @@ async def app_exception_handler(request: Request, exc: AppException) -> ZCoreJSO
 
     return ZCoreJSONResponse(
         status_code=exc.status_code,
+        content=response_payload.model_dump(),
+    )
+
+
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> ZCoreJSONResponse:
+    """Handle FastAPI and Pydantic request payload/query validation errors.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The captured RequestValidationError containing Pydantic error breakdowns.
+
+    Returns:
+        Structured 422 ZCoreJSONResponse containing sanitized field-level error messages.
+    """
+    raw_errors = exc.errors()
+    sanitized_errors = [_sanitize_error_item(err) for err in raw_errors]
+
+    if sanitized_errors:
+        first_err = sanitized_errors[0]
+        field_desc = f" on '{first_err['field']}'" if first_err.get("field") else ""
+        summary_message = f"Validation error{field_desc}: {first_err['message']}"
+    else:
+        summary_message = "Request validation failed"
+
+    log.warning(
+        "Request validation failed",
+        status_code=422,
+        error_count=len(sanitized_errors),
+        path=request.url.path,
+        method=request.method,
+    )
+
+    response_payload = ResponseWrapper[None](
+        success=False,
+        message=summary_message,
+        data=None,
+        meta={
+            "error_type": "RequestValidationError",
+            "errors": sanitized_errors,
+        },
+    )
+
+    return ZCoreJSONResponse(
+        status_code=422,
         content=response_payload.model_dump(),
     )
