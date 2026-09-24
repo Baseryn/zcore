@@ -522,12 +522,20 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
     """Mixin coordinating structured application search operations."""
 
-    async def search(self, search_in: "SearchRequest", pagination: Any = None) -> Any:
-        """Search and filter database models dynamically.
+    async def search(
+        self,
+        search_in: "SearchRequest",
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
+        """Search and filter database models dynamically with load optimization.
 
         Args:
             search_in: A SearchRequest parameter configuration representing constraints.
             pagination: Pagination settings. Defaults to None.
+            fields: Specific entity fields to selectively load. Defaults to None.
+            options: Additional SQLAlchemy executable options. Defaults to None.
 
         Returns:
             A paginated response object containing matches, or a complete list of
@@ -537,6 +545,16 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
 
         engine = SearchEngine(self.model)
         base_query = self._get_base_query()
+
+        if fields:
+            base_query = base_query.options(load_only(*fields))
+        if options:
+            base_query = (
+                base_query.options(*options)
+                if isinstance(options, list)
+                else base_query.options(options)
+            )
+
         query = engine.build_base_query(search_in, base_query=base_query)
         query = self._apply_filters(query)
         if pagination is None:
@@ -549,7 +567,6 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             else PageNumberPagination()
         )
         return await paginator.paginate(self.db, query, pagination, self.model)
-
 
 class BaseRepository(
     Generic[ModelType],
