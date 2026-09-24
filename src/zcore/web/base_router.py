@@ -308,19 +308,24 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         except Exception:
             return None, None
 
-        model_columns = {col.key: col for col in mapper.columns}
-        model_relationships = {rel.key: rel for rel in mapper.relationships}
+        column_keys = {col.key for col in mapper.columns}
+        relationship_map = {rel.key: rel for rel in mapper.relationships}
 
-        load_columns: list[Any] = list(mapper.primary_key)
+        load_columns: list[Any] = []
+        for pk_col in mapper.primary_key:
+            pk_attr = getattr(self.model, pk_col.key, None)
+            if pk_attr is not None:
+                load_columns.append(pk_attr)
+
         loader_options: list[Any] = []
 
         for field_name in schema_fields:
-            if field_name in model_columns:
-                col = model_columns[field_name]
-                if col not in load_columns:
-                    load_columns.append(col)
-            elif field_name in model_relationships:
-                rel = model_relationships[field_name]
+            if field_name in column_keys:
+                col_attr = getattr(self.model, field_name, None)
+                if col_attr is not None and col_attr not in load_columns:
+                    load_columns.append(col_attr)
+            elif field_name in relationship_map:
+                rel = relationship_map[field_name]
                 rel_attr = getattr(self.model, field_name, None)
                 if rel_attr is not None:
                     loader_options.append(
