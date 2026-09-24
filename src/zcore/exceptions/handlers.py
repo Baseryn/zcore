@@ -5,7 +5,7 @@ It captures diagnostics, warning contexts, and metadata, formatting them using t
 response wrapper envelope prior to transmission.
 """
 
-from typing import Any
+from typing import Any, Sequence
 
 import structlog
 from fastapi import Request
@@ -19,27 +19,77 @@ log = structlog.get_logger()
 
 
 class ZCoreJSONResponse(JSONResponse):
+    """Unified JSONResponse utilizing the framework's JSON serializer."""
+
     def render(self, content: Any) -> bytes:
+        """Render response content into JSON bytes using the custom encoder.
+
+        Args:
+            content: The data structure to serialize.
+
+        Returns:
+            UTF-8 encoded JSON byte stream.
+        """
         return json_dumps(content).encode("utf-8")
 
 
-async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
-    """Asynchronously intercept application exceptions and build unified JSON responses.
-
-    Captures context parameter diagnostics, outputs metrics to structured log targets,
-    and packs the diagnostic message and metadata payload inside a structured
-    `ResponseWrapper` response envelope.
+def _format_error_location(loc: Sequence[str | int]) -> str:
+    """Format Pydantic error location tuple into a readable dot-separated path.
 
     Args:
-        request: The active incoming HTTP Request.
-        exc: The captured application exception class instance to process.
+        loc: Sequence of string keys or integer indices.
 
     Returns:
-        A formatted JSONResponse containing the structured error metadata envelope.
+        Dot-separated string representing the field location path.
+    """
+    return ".".join(str(part) for part in loc if part != "")
+
+
+def _sanitize_error_item(err: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize individual Pydantic error dictionaries for serialization safety.
+
+    Args:
+        err: Raw Pydantic error dictionary.
+
+    Returns:
+        A sanitized dictionary containing field path, error message, and error type.
+    """
+    field_path = _format_error_location(err.get("loc", ()))
+    message = err.get("msg", "Invalid value")
+    error_type = err.get("type", "value_error")
+
+    sanitized: dict[str, Any] = {
+        "field": field_path or "root",
+        "message": message,
+        "type": error_type,
+    }
+
+    ctx_info = err.get("ctx")
+    if isinstance(ctx_info, dict):
+        safe_ctx = {
+            k: str(v)
+            for k, v in ctx_info.items()
+            if isinstance(v, (str, int, float, bool))
+        }
+        if safe_ctx:
+            sanitized["context"] = safe_ctx
+
+    return sanitized
+
+
+async def app_exception_handler(request: Request, exc: AppException) -> ZCoreJSONResponse:
+    """Handle custom domain-level `AppException` instances.
+
+    Args:
+        request: The incoming HTTP request.
+        exc: The captured domain exception.
+
+    Returns:
+        Structured ZCoreJSONResponse enclosing the error details.
     """
     log.warning(
         "AppException raised",
-        type=type(exc).__name__,
+        error_type=type(exc).__name__,
         status_code=exc.status_code,
         message=exc.message,
         payload=exc.payload,
@@ -55,5 +105,6 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     )
 
     return ZCoreJSONResponse(
-        status_code=exc.status_code, content=response_payload.model_dump()
+        status_code=exc.status_code,
+        content=response_payload.model_dump(),
     )
