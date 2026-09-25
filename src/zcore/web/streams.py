@@ -2,11 +2,10 @@
 
 This module coordinates multi-subscriber real-time event streaming. It maps active
 user subscription queues locally, handles cluster-wide message propagation
-via Redis PubSub, and safely unregisters listeners on connection termination.
+via Redis PubSub, and safely unregisters listeners on connection termination supporting any user identifier type.
 """
 
 import asyncio
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -38,7 +37,7 @@ class StreamManager:
     `stream:user:<user_id>`, falling back to local memory queues if Redis is unavailable.
 
     Attributes:
-        users_queues: In-memory mapping of active user IDs to list of active
+        users_queues: In-memory mapping of stringified user IDs to lists of active
             asyncio listener queues.
         _pubsub_task: The background asyncio Task processing incoming Redis PubSub frames.
         _pubsub: The active Redis PubSub subscription connection context.
@@ -47,7 +46,7 @@ class StreamManager:
 
     def __init__(self) -> None:
         """Initialize the StreamManager instance."""
-        self.users_queues: dict[uuid.UUID, list[asyncio.Queue[Any]]] = {}
+        self.users_queues: dict[str, list[asyncio.Queue[Any]]] = {}
         self._pubsub_task: asyncio.Task[None] | None = None
         self._pubsub: Any = None
         self._lock = asyncio.Lock()
@@ -62,11 +61,7 @@ class StreamManager:
         return _stream_redis_client
 
     async def start_listening(self) -> None:
-        """Initiate background Redis PubSub pattern-matching subscribers.
-
-        Subscribes to cluster-wide channels of pattern `stream:user:*` and schedules
-        the active listener task in the event loop.
-        """
+        """Initiate background Redis PubSub pattern-matching subscribers."""
         client = self.redis_client
         if not client:
             return
@@ -78,22 +73,14 @@ class StreamManager:
             logger.error(f"Failed to subscribe to Redis PubSub: {e}")
 
     async def _listen_to_redis(self) -> None:
-        """Background loop reading and routing incoming PubSub messages.
-
-        Unpacks incoming messages, parses user scope identifiers, and forwards
-        parsed payloads to matching active local queues.
-        """
+        """Background loop reading and routing incoming PubSub messages."""
         try:
             async for message in self._pubsub.listen():
                 if message["type"] == "pmessage":
                     channel = message["channel"]
                     user_id_str = channel.split(":")[-1]
-                    try:
-                        user_id = uuid.UUID(user_id_str)
-                    except ValueError:
-                        continue
                     data = json_loads(message["data"])
-                    await self._local_publish(user_id, data)
+                    await self._local_publish(user_id_str, data)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -107,7 +94,7 @@ class StreamManager:
                 except Exception as e:
                     logger.error(f"Failed to release Redis PubSub connection: {e}")
 
-    async def subscribe(self, user_id: uuid.UUID) -> asyncio.Queue[Any]:
+    async def subscribe(self, user_id: Any) -> asyncio.Queue[Any]:
         """Subscribe a user, returning a bounded async listener queue.
 
         Args:
@@ -116,33 +103,32 @@ class StreamManager:
         Returns:
             A bounded asyncio Queue configured to receive events.
         """
+        user_key = str(user_id)
         queue_maxsize = getattr(settings, "STREAM_QUEUE_MAXSIZE", 100)
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         async with self._lock:
-            if user_id not in self.users_queues:
-                self.users_queues[user_id] = []
+            if user_key not in self.users_queues:
+                self.users_queues[user_key] = []
                 client = self.redis_client
                 if client and (self._pubsub_task is None or self._pubsub_task.done()):
                     await self.start_listening()
-            self.users_queues[user_id].append(queue)
+            self.users_queues[user_key].append(queue)
         return queue
 
-    async def unsubscribe(self, user_id: uuid.UUID, queue: asyncio.Queue[Any]) -> None:
+    async def unsubscribe(self, user_id: Any, queue: asyncio.Queue[Any]) -> None:
         """Unsubscribe a user's listener queue.
-
-        Pops the active queue, and shuts down the background task if no active
-        listener queues remain in the system.
 
         Args:
             user_id: The target user identifier key.
             queue: The active asyncio Queue to unsubscribe.
         """
+        user_key = str(user_id)
         async with self._lock:
-            if user_id in self.users_queues:
-                if queue in self.users_queues[user_id]:
-                    self.users_queues[user_id].remove(queue)
-                if not self.users_queues[user_id]:
-                    del self.users_queues[user_id]
+            if user_key in self.users_queues:
+                if queue in self.users_queues[user_key]:
+                    self.users_queues[user_key].remove(queue)
+                if not self.users_queues[user_key]:
+                    del self.users_queues[user_key]
             if (
                 not self.users_queues
                 and self._pubsub_task
@@ -153,11 +139,9 @@ class StreamManager:
 
     @asynccontextmanager
     async def subscription(
-        self, user_id: uuid.UUID
+        self, user_id: Any
     ) -> AsyncGenerator[asyncio.Queue[Any], None]:
         """Context manager safely wrapping active user event streams.
-
-        Guarantees cleanup and unregistration of the queue upon block exit.
 
         Args:
             user_id: The target user identifier key to stream.
@@ -171,36 +155,33 @@ class StreamManager:
         finally:
             await self.unsubscribe(user_id, queue)
 
-    async def publish(self, user_id: uuid.UUID, data: dict[str, Any]) -> None:
+    async def publish(self, user_id: Any, data: dict[str, Any]) -> None:
         """Publish an event payload to a target user's stream.
-
-        Routes the message through Redis PubSub if configured to broadcast to
-        all active nodes, falling back to local memory delivery if unconfigured.
 
         Args:
             user_id: The target user identifier key.
             data: Key-value dictionary event payload to publish.
         """
+        user_key = str(user_id)
         client = self.redis_client
         if client:
             try:
-                await client.publish(f"stream:user:{user_id}", json_dumps(data))
+                await client.publish(f"stream:user:{user_key}", json_dumps(data))
                 return
             except Exception as e:
                 logger.error(f"Redis publish failed: {e}")
-        await self._local_publish(user_id, data)
+        await self._local_publish(user_key, data)
 
-    async def _local_publish(self, user_id: uuid.UUID, data: dict[str, Any]) -> None:
+    async def _local_publish(self, user_id: Any, data: dict[str, Any]) -> None:
         """Route event data locally to all registered active queues for a user.
-
-        Unsubscribes and discards queues that overflow to prevent resource exhaustion.
 
         Args:
             user_id: The target user identifier key.
             data: Key-value dictionary event payload.
         """
+        user_key = str(user_id)
         async with self._lock:
-            queues = self.users_queues.get(user_id)
+            queues = self.users_queues.get(user_key)
             if not queues:
                 return
             for queue in list(queues):
@@ -209,5 +190,5 @@ class StreamManager:
                 except asyncio.QueueFull:
                     if queue in queues:
                         queues.remove(queue)
-            if not self.users_queues[user_id]:
-                del self.users_queues[user_id]
+            if not self.users_queues[user_key]:
+                del self.users_queues[user_key]
