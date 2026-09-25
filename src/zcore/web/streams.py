@@ -37,7 +37,7 @@ class StreamManager:
     `stream:user:<user_id>`, falling back to local memory queues if Redis is unavailable.
 
     Attributes:
-        users_queues: In-memory mapping of stringified user IDs to lists of active
+        users_queues: In-memory mapping of user IDs (UUID, int, str) to lists of active
             asyncio listener queues.
         _pubsub_task: The background asyncio Task processing incoming Redis PubSub frames.
         _pubsub: The active Redis PubSub subscription connection context.
@@ -46,7 +46,7 @@ class StreamManager:
 
     def __init__(self) -> None:
         """Initialize the StreamManager instance."""
-        self.users_queues: dict[str, list[asyncio.Queue[Any]]] = {}
+        self.users_queues: dict[Any, list[asyncio.Queue[Any]]] = {}
         self._pubsub_task: asyncio.Task[None] | None = None
         self._pubsub: Any = None
         self._lock = asyncio.Lock()
@@ -103,16 +103,15 @@ class StreamManager:
         Returns:
             A bounded asyncio Queue configured to receive events.
         """
-        user_key = str(user_id)
         queue_maxsize = getattr(settings, "STREAM_QUEUE_MAXSIZE", 100)
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         async with self._lock:
-            if user_key not in self.users_queues:
-                self.users_queues[user_key] = []
+            if user_id not in self.users_queues:
+                self.users_queues[user_id] = []
                 client = self.redis_client
                 if client and (self._pubsub_task is None or self._pubsub_task.done()):
                     await self.start_listening()
-            self.users_queues[user_key].append(queue)
+            self.users_queues[user_id].append(queue)
         return queue
 
     async def unsubscribe(self, user_id: Any, queue: asyncio.Queue[Any]) -> None:
@@ -122,13 +121,21 @@ class StreamManager:
             user_id: The target user identifier key.
             queue: The active asyncio Queue to unsubscribe.
         """
-        user_key = str(user_id)
         async with self._lock:
-            if user_key in self.users_queues:
-                if queue in self.users_queues[user_key]:
-                    self.users_queues[user_key].remove(queue)
-                if not self.users_queues[user_key]:
-                    del self.users_queues[user_key]
+            if user_id in self.users_queues:
+                if queue in self.users_queues[user_id]:
+                    self.users_queues[user_id].remove(queue)
+                if not self.users_queues[user_id]:
+                    del self.users_queues[user_id]
+            else:
+                str_target = str(user_id)
+                for k in list(self.users_queues.keys()):
+                    if str(k) == str_target:
+                        if queue in self.users_queues[k]:
+                            self.users_queues[k].remove(queue)
+                        if not self.users_queues[k]:
+                            del self.users_queues[k]
+
             if (
                 not self.users_queues
                 and self._pubsub_task
@@ -162,15 +169,14 @@ class StreamManager:
             user_id: The target user identifier key.
             data: Key-value dictionary event payload to publish.
         """
-        user_key = str(user_id)
         client = self.redis_client
         if client:
             try:
-                await client.publish(f"stream:user:{user_key}", json_dumps(data))
+                await client.publish(f"stream:user:{user_id}", json_dumps(data))
                 return
             except Exception as e:
                 logger.error(f"Redis publish failed: {e}")
-        await self._local_publish(user_key, data)
+        await self._local_publish(user_id, data)
 
     async def _local_publish(self, user_id: Any, data: dict[str, Any]) -> None:
         """Route event data locally to all registered active queues for a user.
@@ -179,16 +185,25 @@ class StreamManager:
             user_id: The target user identifier key.
             data: Key-value dictionary event payload.
         """
-        user_key = str(user_id)
         async with self._lock:
-            queues = self.users_queues.get(user_key)
-            if not queues:
-                return
-            for queue in list(queues):
-                try:
-                    queue.put_nowait(data)
-                except asyncio.QueueFull:
-                    if queue in queues:
-                        queues.remove(queue)
-            if not self.users_queues[user_key]:
-                del self.users_queues[user_key]
+            target_keys = []
+            if user_id in self.users_queues:
+                target_keys.append(user_id)
+            else:
+                str_id = str(user_id)
+                for k in self.users_queues:
+                    if str(k) == str_id:
+                        target_keys.append(k)
+
+            for key in target_keys:
+                queues = self.users_queues.get(key)
+                if not queues:
+                    continue
+                for queue in list(queues):
+                    try:
+                        queue.put_nowait(data)
+                    except asyncio.QueueFull:
+                        if queue in queues:
+                            queues.remove(queue)
+                if not self.users_queues.get(key):
+                    self.users_queues.pop(key, None)
