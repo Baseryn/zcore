@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, inspect, or_, select, and_
+from sqlalchemy import and_, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.sqltypes import DateTime

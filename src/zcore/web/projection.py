@@ -41,9 +41,7 @@ class Zchema(BaseModel):
         global_prefix = f"{model_name}."
 
         for path in restricted:
-            if path == model_name:
-                relative_paths.add("*")
-            elif action and path == f"{model_name}.{action}":
+            if path == model_name or (action and path == f"{model_name}.{action}"):
                 relative_paths.add("*")
             elif action_prefix and path.startswith(action_prefix):
                 relative_paths.add(path[len(action_prefix) :])
