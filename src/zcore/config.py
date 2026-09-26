@@ -37,7 +37,7 @@ class LoggingSettings(BaseModel):
 
     level: str = "INFO"
     json_format: bool | None = None
-    log_sql_queries: bool = True
+    log_sql_queries: bool = False
     slow_query_threshold_ms: float | None = None
     file_path: str | None = None
     max_bytes: int = 10 * 1024 * 1024
@@ -73,6 +73,7 @@ class Settings(BaseSettings):
 
     LOGGING: LoggingSettings = Field(default_factory=LoggingSettings)
     LOG_LEVEL: str = "INFO"
+    LOG_SQL_QUERIES: bool | None = None
 
     TIMEZONE: str = "UTC"
     AUTO_CONVERT_TIMEZONE: bool = True
@@ -132,6 +133,9 @@ class Settings(BaseSettings):
             self.LOGGING.level = self.LOG_LEVEL
         elif self.LOGGING.level != "INFO" and self.LOG_LEVEL == "INFO":
             self.LOG_LEVEL = self.LOGGING.level
+
+        if self.LOG_SQL_QUERIES is not None:
+            self.LOGGING.log_sql_queries = self.LOG_SQL_QUERIES
 
         return self
 
