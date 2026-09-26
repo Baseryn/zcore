@@ -11,6 +11,10 @@ from pydantic import BaseModel, model_serializer, model_validator
 
 from zcore.context.context import ctx
 
+STANDARD_ACTIONS: frozenset[str] = frozenset(
+    {"listview", "view", "create", "update", "delete", "lookup"}
+)
+
 
 class Zchema(BaseModel):
     """Unified, domain-aware security schema base class.
@@ -37,18 +41,21 @@ class Zchema(BaseModel):
         global_prefix = f"{model_name}."
 
         for path in restricted:
-            if action_prefix and path.startswith(action_prefix):
-                relative_paths.add(path[len(action_prefix) :])
+            if path == model_name:
+                relative_paths.add("*")
             elif action and path == f"{model_name}.{action}":
                 relative_paths.add("*")
+            elif action_prefix and path.startswith(action_prefix):
+                relative_paths.add(path[len(action_prefix) :])
             elif path.startswith(global_prefix):
                 remaining = path[len(global_prefix) :]
                 parts = remaining.split(".", 1)
-                if action and parts[0] == action:
-                    continue
-                relative_paths.add(remaining)
-            elif path == model_name:
-                relative_paths.add("*")
+                if parts[0] in STANDARD_ACTIONS:
+                    if action != parts[0]:
+                        continue
+                    relative_paths.add(parts[1] if len(parts) > 1 else "*")
+                else:
+                    relative_paths.add(remaining)
 
         return relative_paths
 
@@ -58,8 +65,8 @@ class Zchema(BaseModel):
         data: Any,
         relative_paths: set[str],
     ) -> Any:
-        """Recursively strip restricted attributes from dictionary representations."""
-        if not isinstance(data, dict):
+        """Recursively strip restricted attributes from dictionary representations with early termination."""
+        if not isinstance(data, dict) or not relative_paths:
             return data
 
         if "*" in relative_paths:
@@ -77,10 +84,13 @@ class Zchema(BaseModel):
                     nested_restrictions[key] = set()
                 nested_restrictions[key].add(remaining)
 
+        if not nested_restrictions:
+            return data
+
         for key in list(data.keys()):
-            val = data[key]
             if key in nested_restrictions:
                 rem_paths = nested_restrictions[key]
+                val = data[key]
                 if isinstance(val, dict):
                     data[key] = cls._prune_data(val, rem_paths)
                 elif isinstance(val, list):
@@ -90,15 +100,6 @@ class Zchema(BaseModel):
                         else item
                         for item in val
                     ]
-            elif isinstance(val, dict):
-                data[key] = cls._prune_data(val, set())
-            elif isinstance(val, list):
-                data[key] = [
-                    cls._prune_data(item, set())
-                    if isinstance(item, dict)
-                    else item
-                    for item in val
-                ]
         return data
 
     @classmethod
@@ -112,7 +113,7 @@ class Zchema(BaseModel):
             return json_schema
 
         def prune_schema(schema: dict[str, Any], paths: set[str]) -> None:
-            if not isinstance(schema, dict):
+            if not isinstance(schema, dict) or not paths:
                 return
 
             if "*" in paths:
@@ -161,10 +162,10 @@ class Zchema(BaseModel):
         """Securely intercept serialization to prune restricted attributes."""
         serialized = handler(self)
         relative_paths = self._get_relative_restricted_paths()
-        if serialized is None:
+        if serialized is None or not relative_paths:
             return serialized
 
-        if isinstance(serialized, dict) and relative_paths:
+        if isinstance(serialized, dict):
             serialized_copy = dict(serialized)
             return self._prune_data(serialized_copy, relative_paths)
         return serialized
