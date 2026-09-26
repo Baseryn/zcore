@@ -30,8 +30,8 @@ logger = structlog.get_logger()
 T = TypeVar("T")
 
 _current_scope_id: ContextVar[str | None] = ContextVar("scope_id", default=None)
-_scoped_instances: ContextVar[dict[type[Any], Any]] = ContextVar(
-    "scoped_instances", default={}
+_scoped_instances: ContextVar[dict[type[Any], Any] | None] = ContextVar(
+    "scoped_instances", default=None
 )
 
 
@@ -105,11 +105,9 @@ class IoCContainer:
             DIException: If registered outside of an active scope boundary.
         """
         scope_id = _current_scope_id.get()
-        if scope_id:
-            current_instances = _scoped_instances.get()
-            new_instances = dict(current_instances)
-            new_instances[interface] = instance
-            _scoped_instances.set(new_instances)
+        current_instances = _scoped_instances.get()
+        if scope_id is not None and current_instances is not None:
+            current_instances[interface] = instance
         else:
             raise DIException(
                 "Cannot register scoped instance outside of an active scope."
@@ -151,16 +149,15 @@ class IoCContainer:
             return self._singletons[interface]
 
         scope_id = _current_scope_id.get()
-        if scope_id:
+        if scope_id is not None:
             current_instances = _scoped_instances.get()
-            if interface in current_instances:
+            if current_instances is not None and interface in current_instances:
                 return current_instances[interface]
 
             if interface in self._scoped_definitions:
                 resolved_instance = self._scoped_definitions[interface](_stack)
-                new_instances = dict(current_instances)
-                new_instances[interface] = resolved_instance
-                _scoped_instances.set(new_instances)
+                if current_instances is not None:
+                    current_instances[interface] = resolved_instance
                 return resolved_instance
 
         if interface in self._factories:
@@ -246,13 +243,15 @@ class IoCContainer:
         finally:
             _stack.remove(target_class)
 
-    def clear_scope(self, scope_id: str) -> None:
+    def clear_scope(self, scope_id: str | None = None) -> None:
         """Explicit scope cleanup hook.
 
         Args:
             scope_id: The string identifier of the scope to purge.
         """
-        _scoped_instances.set({})
+        current_instances = _scoped_instances.get()
+        if current_instances is not None:
+            current_instances.clear()
 
 
 container = IoCContainer()
@@ -324,6 +323,7 @@ async def background_scope(
 
     scope_id = str(uuid.uuid4())
     scope_token = _current_scope_id.set(scope_id)
+    instances_token = _scoped_instances.set({})
 
     initial_store = dict(_request_context_store.get()) if inherit_context else {}
     initial_store.update(custom_context)
@@ -335,11 +335,14 @@ async def background_scope(
     structlog.contextvars.bind_contextvars(task_id=scope_id)
 
     try:
-        async with db_manager.session() as session:
-            container.register_scoped_instance(AsyncSession, session)
+        if getattr(db_manager, "_session_factory", None) is not None:
+            async with db_manager.session() as session:
+                container.register_scoped_instance(AsyncSession, session)
+                yield
+        else:
             yield
     finally:
-        container.clear_scope(scope_id)
+        _scoped_instances.reset(instances_token)
         _current_scope_id.reset(scope_token)
         _request_context_store.reset(ctx_token)
         structlog.contextvars.clear_contextvars()
