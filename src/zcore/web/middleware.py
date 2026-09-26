@@ -101,9 +101,10 @@ class RequestLogMiddleware:
             await self.app(scope, receive, send_wrapper)
             duration = (time.perf_counter() - s_time) * 1000
 
-            should_log_metrics = getattr(settings, "DEBUG", False) is False and getattr(
-                getattr(settings, "LOGGING", None), "json_format", False
-            )
+            logging_cfg = getattr(settings, "LOGGING", None)
+            json_fmt = getattr(logging_cfg, "json_format", None) if logging_cfg else None
+            is_json_mode = json_fmt if json_fmt is not None else (getattr(settings, "DEBUG", False) is False)
+            should_log_metrics = (getattr(settings, "DEBUG", False) is False) and is_json_mode
 
             if should_log_metrics:
                 log.info(

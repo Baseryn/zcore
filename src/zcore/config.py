@@ -136,6 +136,8 @@ class Settings(BaseSettings):
 
         if self.LOG_SQL_QUERIES is not None:
             self.LOGGING.log_sql_queries = self.LOG_SQL_QUERIES
+        elif self.LOGGING.log_sql_queries is not False:
+            self.LOG_SQL_QUERIES = self.LOGGING.log_sql_queries
 
         return self
 

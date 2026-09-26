@@ -144,9 +144,9 @@ def setup_logging(
     root_logger.setLevel(level)
 
     for logger_name in cfg.muted_loggers:
-        log = logging.getLogger(logger_name)
-        log.handlers.clear()
-        log.propagate = True
+        muted_logger = logging.getLogger(logger_name)
+        muted_logger.handlers.clear()
+        muted_logger.propagate = True
 
     structlog.configure(
         processors=[
