@@ -35,7 +35,7 @@ LAYER_CHOICES = [
     Choice("Base Service Layer (services.py)", value="services"),
     Choice("FastAPI Base Router (routers.py)", value="routers"),
     Choice("Modular Lifecycle Plugin (plugin.py)", value="plugin"),
-    Choice("Pytest Async Test Suite (tests.py)", value="tests"),
+    Choice("Pytest Async Test Suite (test_<app_name>.py)", value="tests"),
 ]
 
 
