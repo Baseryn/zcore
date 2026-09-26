@@ -713,7 +713,7 @@ def test_zchema_input_validation_preserves_raw_types() -> None:
 
 
 @pytest.mark.anyio
-async def test_request_log_middleware_captures_status_and_client_ip() -> None:
+async def test_request_log_middleware_captures_status_and_client_ip(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     app.add_middleware(RequestLogMiddleware)
 
@@ -721,6 +721,22 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
     def get_status() -> dict[str, str]:
         return {"status": "ok"}
 
+    with patch("zcore.web.middleware.log.debug") as mock_log_debug:
+        transport = ASGITransport(app=app, client=("192.168.1.50", 54321), raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/status-test")
+            assert res.status_code == 200
+
+        mock_log_debug.assert_called_once()
+        log_kwargs = mock_log_debug.call_args[1]
+        assert log_kwargs["status_code"] == 200
+        assert log_kwargs["client_ip"] == "192.168.1.50"
+        assert log_kwargs["path"] == "/status-test"
+        assert log_kwargs["method"] == "GET"
+        assert "duration_ms" in log_kwargs
+
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings.LOGGING, "json_format", True)
     with patch("zcore.web.middleware.log.info") as mock_log_info:
         transport = ASGITransport(app=app, client=("192.168.1.50", 54321), raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -731,9 +747,6 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
         log_kwargs = mock_log_info.call_args[1]
         assert log_kwargs["status_code"] == 200
         assert log_kwargs["client_ip"] == "192.168.1.50"
-        assert log_kwargs["path"] == "/status-test"
-        assert log_kwargs["method"] == "GET"
-        assert "duration_ms" in log_kwargs
 
 
 @pytest.mark.anyio
