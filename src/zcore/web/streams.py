@@ -90,7 +90,7 @@ class StreamManager:
                 try:
                     await self._pubsub.punsubscribe("stream:user:*")
                     await self._pubsub.close()
-                    logger.info("Redis PubSub connection safely released.")
+                    logger.debug("Redis PubSub connection safely released.")
                 except Exception as e:
                     logger.error(f"Failed to release Redis PubSub connection: {e}")
 
