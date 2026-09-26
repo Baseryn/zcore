@@ -129,7 +129,14 @@ class DatabaseManager:
             conn, cursor, statement, parameters, context, exec_many
         ):
             logging_cfg = getattr(settings, "LOGGING", None)
-            if logging_cfg and not getattr(logging_cfg, "log_sql_queries", True):
+            should_log_queries = getattr(logging_cfg, "log_sql_queries", False)
+            slow_threshold = (
+                getattr(logging_cfg, "slow_query_threshold_ms", None)
+                if logging_cfg
+                else None
+            )
+
+            if not should_log_queries and slow_threshold is None:
                 return
 
             start_time = getattr(context, "_query_start_time", None)
@@ -137,13 +144,9 @@ class DatabaseManager:
             if start_time:
                 duration_ms = (time.perf_counter() - start_time) * 1000
 
-            slow_threshold = (
-                getattr(logging_cfg, "slow_query_threshold_ms", None)
-                if logging_cfg
-                else None
-            )
-            if slow_threshold is not None and duration_ms < slow_threshold:
-                return
+            if not should_log_queries and slow_threshold is not None:
+                if duration_ms < slow_threshold:
+                    return
 
             compact_statement = " ".join(statement.split())
 
@@ -179,13 +182,12 @@ class DatabaseManager:
         """Configure the connection pool, engine, and session factories.
 
         Configures parameters for SQLite and server-based relational engines
-        (such as PostgreSQL or MySQL), supporting structured settings, custom
-        connect_args, execution_options, and JSON serializers.
+        supporting structured settings, custom connect_args, execution_options,
+        and JSON serializers.
 
         Args:
             db_url: The primary database connection URL. Defaults to None.
             config: An optional `DatabaseSettings` instance or configuration dictionary.
-                Defaults to None.
             pool_size: The connection pool size for non-SQLite databases. Defaults to 5.
             max_overflow: The max overflowing connections beyond pool size. Defaults to 10.
             pool_recycle: Connection recycle time in seconds. Defaults to 1800.
@@ -269,7 +271,7 @@ class DatabaseManager:
         self._register_query_logger(self._engine.sync_engine)
 
         dialect_logger = structlog.get_logger(f"zcore.db.{self._engine.dialect.name}")
-        dialect_logger.info(
+        dialect_logger.debug(
             "DatabaseManager successfully initialized with dialect statement logger."
         )
 
@@ -281,7 +283,7 @@ class DatabaseManager:
             dialect_logger = structlog.get_logger(
                 f"zcore.db.{self._engine.dialect.name}"
             )
-            dialect_logger.info("DatabaseManager engine connections closed.")
+            dialect_logger.debug("DatabaseManager engine connections closed.")
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
