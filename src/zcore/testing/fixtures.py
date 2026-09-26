@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from zcore.context.context import _request_context_store
 from zcore.db.setup import db_manager
-from zcore.kernel.di import _current_scope_id, container
+from zcore.kernel.di import _current_scope_id, _scoped_instances, container
 from zcore.kernel.events import EventDispatcher
 
 
@@ -124,6 +124,7 @@ class DatabaseRollback(ZTestFixture):
         self.transaction: Any = None
         self.session: AsyncSession | None = None
         self._scope_token: Any = None
+        self._instances_token: Any = None
         self._original_session_method: Any = None
 
     async def setUp(self) -> None:
@@ -142,6 +143,7 @@ class DatabaseRollback(ZTestFixture):
 
         scope_id = str(uuid.uuid4())
         self._scope_token = _current_scope_id.set(scope_id)
+        self._instances_token = _scoped_instances.set({})
         container.register_scoped_instance(AsyncSession, self.session)
 
         @asynccontextmanager
@@ -165,10 +167,9 @@ class DatabaseRollback(ZTestFixture):
         if self._original_session_method:
             db_manager.session = self._original_session_method
 
+        if self._instances_token:
+            _scoped_instances.reset(self._instances_token)
         if self._scope_token:
-            scope_id = _current_scope_id.get()
-            if scope_id:
-                container.clear_scope(scope_id)
             _current_scope_id.reset(self._scope_token)
 
         if self.session:
