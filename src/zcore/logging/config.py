@@ -70,26 +70,25 @@ def setup_logging(
     )
 
     if not is_json:
-        structlog.configure(
-            processors=[
-                structlog.contextvars.merge_contextvars,
-                structlog.stdlib.add_log_level,
-                structlog.stdlib.PositionalArgumentsFormatter(),
-                structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S"),
-                structlog.dev.ConsoleRenderer(colors=True),
-            ],
-            logger_factory=structlog.stdlib.LoggerFactory(),
-            wrapper_class=structlog.stdlib.BoundLogger,
-            cache_logger_on_first_use=True,
-        )
-        return
+        try:
+            from rich.traceback import install
 
-    shared_processors = [
+            install(show_locals=False)
+        except ImportError:
+            pass
+
+    time_stamper = (
+        structlog.processors.TimeStamper(fmt="iso")
+        if is_json
+        else structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
+    )
+
+    shared_processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
+        time_stamper,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
@@ -99,7 +98,11 @@ def setup_logging(
     if custom_processors:
         shared_processors.extend(custom_processors)
 
-    renderer = structlog.processors.JSONRenderer()
+    renderer = (
+        structlog.processors.JSONRenderer()
+        if is_json
+        else structlog.dev.ConsoleRenderer(colors=True)
+    )
 
     formatter = structlog.stdlib.ProcessorFormatter(
         foreign_pre_chain=shared_processors,
@@ -139,6 +142,11 @@ def setup_logging(
     for h in handlers:
         root_logger.addHandler(h)
     root_logger.setLevel(level)
+
+    for logger_name in cfg.muted_loggers:
+        log = logging.getLogger(logger_name)
+        log.handlers.clear()
+        log.propagate = True
 
     structlog.configure(
         processors=[
