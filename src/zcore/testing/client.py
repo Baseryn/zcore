@@ -168,12 +168,17 @@ class ZTestClient:
                 class GenericMockUser:
                     id = user_id
                     is_active = True
-                    is_superuser = is_superuser
-                    scopes = scopes_list
 
-                    def __init__(self, attrs: dict[str, Any]):
+                    def __init__(self, attrs: dict[str, Any]) -> None:
+                        self.id = user_id
+                        self.is_active = True
+                        self.is_superuser = is_superuser
+                        self.scopes = scopes_list
                         for k, v in attrs.items():
                             setattr(self, k, v)
+
+                setattr(GenericMockUser, "is_superuser", is_superuser)
+                setattr(GenericMockUser, "scopes", scopes_list)
 
                 return GenericMockUser(extra_user_attrs or {})
 

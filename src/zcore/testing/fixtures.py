@@ -130,10 +130,7 @@ class DatabaseRollback(ZTestFixture):
         """Establish isolated connection, transaction savepoint, and register session overrides."""
         target_engine = self.engine or getattr(db_manager, "_engine", None)
         if target_engine is None:
-            raise RuntimeError(
-                "No database engine available for DatabaseRollback. "
-                "Provide an engine to ZTestClient or initialize db_manager first."
-            )
+            raise RuntimeError("DatabaseManager engine is uninitialized.")
 
         self.connection = await target_engine.connect()
         self.transaction = await self.connection.begin()
