@@ -151,7 +151,7 @@ async def test_db_manager_uninitialized_access() -> None:
 
 
 @pytest.mark.anyio
-async def test_db_manager_sql_logger_timing() -> None:
+async def test_db_manager_sql_logger_timing(monkeypatch: pytest.MonkeyPatch) -> None:
     listeners = {}
 
     def mock_listens_for(target, identifier):
@@ -174,6 +174,8 @@ async def test_db_manager_sql_logger_timing() -> None:
 
         assert "before_cursor_execute" in listeners
         assert "after_cursor_execute" in listeners
+
+        monkeypatch.setattr(settings.LOGGING, "log_sql_queries", True)
 
         mock_context = MagicMock()
         listeners["before_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
@@ -343,6 +345,7 @@ def test_sql_query_logger_suppression_when_disabled(monkeypatch: pytest.MonkeyPa
         listeners["before_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
 
         monkeypatch.setattr(settings.LOGGING, "log_sql_queries", False)
+        monkeypatch.setattr(settings.LOGGING, "slow_query_threshold_ms", None)
         listeners["after_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
         mock_logger.info.assert_not_called()
 

@@ -178,7 +178,7 @@ def test_logging_settings_model_defaults_and_custom() -> None:
     default_log = LoggingSettings()
     assert default_log.level == "INFO"
     assert default_log.json_format is None
-    assert default_log.log_sql_queries is True
+    assert default_log.log_sql_queries is False
     assert default_log.slow_query_threshold_ms is None
     assert default_log.file_path is None
     assert default_log.muted_loggers == [
@@ -191,6 +191,7 @@ def test_logging_settings_model_defaults_and_custom() -> None:
 
     def dummy_processor(logger, method, event_dict):
         return event_dict
+
     custom_log = LoggingSettings(
         level="DEBUG",
         json_format=True,
@@ -232,11 +233,12 @@ def test_settings_sync_validator_database_bidirectional() -> None:
 
 
 def test_settings_sync_validator_logging_bidirectional() -> None:
-    settings_from_flat = Settings(LOG_LEVEL="DEBUG")
+    settings_from_flat = Settings(LOG_LEVEL="DEBUG", LOG_SQL_QUERIES=True)
     assert settings_from_flat.LOGGING.level == "DEBUG"
+    assert settings_from_flat.LOGGING.log_sql_queries is True
 
     settings_from_nested = Settings(
-        LOGGING=LoggingSettings(level="ERROR")
+        LOGGING=LoggingSettings(level="ERROR", log_sql_queries=False)
     )
     assert settings_from_nested.LOG_LEVEL == "ERROR"
 
