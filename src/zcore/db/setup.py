@@ -144,9 +144,8 @@ class DatabaseManager:
             if start_time:
                 duration_ms = (time.perf_counter() - start_time) * 1000
 
-            if not should_log_queries and slow_threshold is not None:
-                if duration_ms < slow_threshold:
-                    return
+            if slow_threshold is not None and duration_ms < slow_threshold:
+                return
 
             compact_statement = " ".join(statement.split())
 
