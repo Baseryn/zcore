@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zcore.context.context import _request_context_store
 from zcore.db.setup import db_manager
 from zcore.kernel.di import _current_scope_id, container
+from zcore.kernel.events import EventDispatcher
 
 
 class ZTestFixture(ABC):
@@ -37,6 +38,31 @@ class ContainerSandbox(ZTestFixture):
         container._singletons = self._singletons
         container._scoped_definitions = self._scoped
         container._factories = self._factories
+
+
+class EventDispatcherSandbox(ZTestFixture):
+    def __init__(self, dispatcher: EventDispatcher | None = None) -> None:
+        self._dispatcher = dispatcher
+        self._subscribers_snapshot: dict[str, list[Any]] = {}
+
+    async def setUp(self) -> None:
+        if self._dispatcher is None:
+            try:
+                self._dispatcher = container.resolve(EventDispatcher)
+            except Exception:
+                self._dispatcher = None
+
+        if self._dispatcher is not None:
+            self._subscribers_snapshot = {
+                event: list(handlers)
+                for event, handlers in self._dispatcher._subscribers.items()
+            }
+
+    async def tearDown(self) -> None:
+        if self._dispatcher is not None:
+            self._dispatcher._subscribers.clear()
+            for event, handlers in self._subscribers_snapshot.items():
+                self._dispatcher._subscribers[event] = list(handlers)
 
 
 class DatabaseRollback(ZTestFixture):
