@@ -1,11 +1,11 @@
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from zcore.context.context import _request_context_store
 from zcore.db.setup import db_manager
@@ -66,18 +66,35 @@ class EventDispatcherSandbox(ZTestFixture):
 
 
 class DatabaseRollback(ZTestFixture):
-    def __init__(self) -> None:
-        self.connection = None
-        self.transaction = None
-        self.session = None
-        self._scope_token = None
-        self._original_session_method = None
+    def __init__(
+        self,
+        engine: AsyncEngine | None = None,
+        db_dependency: Any | Sequence[Any] | None = None,
+        app: FastAPI | None = None,
+    ) -> None:
+        self.engine = engine
+        self.db_dependency = (
+            [db_dependency]
+            if db_dependency and not isinstance(db_dependency, (list, tuple))
+            else list(db_dependency or [])
+        )
+        self.app = app
+
+        self.connection: Any = None
+        self.transaction: Any = None
+        self.session: AsyncSession | None = None
+        self._scope_token: Any = None
+        self._original_session_method: Any = None
 
     async def setUp(self) -> None:
-        if not db_manager._engine:
-            raise RuntimeError("DatabaseManager engine is uninitialized.")
+        target_engine = self.engine or getattr(db_manager, "_engine", None)
+        if target_engine is None:
+            raise RuntimeError(
+                "No database engine available for DatabaseRollback. "
+                "Provide an engine to ZTestClient or initialize db_manager first."
+            )
 
-        self.connection = await db_manager._engine.connect()
+        self.connection = await target_engine.connect()
         self.transaction = await self.connection.begin()
         self.session = AsyncSession(
             bind=self.connection,
@@ -93,10 +110,19 @@ class DatabaseRollback(ZTestFixture):
         async def mock_session_manager() -> AsyncGenerator[AsyncSession, None]:
             yield self.session
 
-        self._original_session_method = db_manager.session
-        db_manager.session = mock_session_manager
+        if getattr(db_manager, "_engine", None) is target_engine:
+            self._original_session_method = db_manager.session
+            db_manager.session = mock_session_manager
+
+        if self.app is not None and self.db_dependency:
+            for dep in self.db_dependency:
+                self.app.dependency_overrides[dep] = lambda: self.session
 
     async def tearDown(self) -> None:
+        if self.app is not None and self.db_dependency:
+            for dep in self.db_dependency:
+                self.app.dependency_overrides.pop(dep, None)
+
         if self._original_session_method:
             db_manager.session = self._original_session_method
 
@@ -119,18 +145,21 @@ class UserContext(ZTestFixture):
         self,
         user_id: Any,
         scopes: list[str] | None = None,
+        is_superuser: bool = False,
         extra_context: dict[str, Any] | None = None,
     ) -> None:
         self.user_id = user_id
         self.scopes = scopes or []
+        self.is_superuser = is_superuser
         self.extra_context = extra_context or {}
-        self._token = None
+        self._token: Any = None
 
     async def setUp(self) -> None:
         current_store = _request_context_store.get()
         new_store = dict(current_store)
         new_store["user_id"] = self.user_id
         new_store["scopes"] = self.scopes
+        new_store["is_superuser"] = self.is_superuser
         for key, val in self.extra_context.items():
             new_store[key] = val
         self._token = _request_context_store.set(new_store)
@@ -157,7 +186,7 @@ class DependencyOverride(ZTestFixture):
 class AppLifespan(ZTestFixture):
     def __init__(self, app: FastAPI) -> None:
         self.app = app
-        self.lifespan_ctx = None
+        self.lifespan_ctx: Any = None
 
     async def setUp(self) -> None:
         self.lifespan_ctx = self.app.router.lifespan_context(self.app)
