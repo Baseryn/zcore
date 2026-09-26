@@ -318,7 +318,15 @@ class CursorPagination(BasePagination[T]):
             val = cursor_data["value"]
             last_id = cursor_data["id"]
 
-            if isinstance(last_id, str):
+            try:
+                pk_type = getattr(pk_col.type, "python_type", None)
+            except (NotImplementedError, AttributeError):
+                pk_type = None
+
+            if pk_type is int and isinstance(last_id, str):
+                with contextlib.suppress(ValueError):
+                    last_id = int(last_id)
+            elif pk_type is uuid.UUID and isinstance(last_id, str):
                 with contextlib.suppress(ValueError):
                     last_id = uuid.UUID(last_id)
 
