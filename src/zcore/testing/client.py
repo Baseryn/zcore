@@ -1,3 +1,5 @@
+import asyncio
+import concurrent.futures
 import uuid
 from abc import ABC
 from collections.abc import AsyncGenerator
@@ -6,8 +8,11 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from zcore.security import get_current_user_stub
+from zcore.config import settings
+from zcore.db.setup import Base, db_manager
+from zcore.security.dependencies import get_current_user_stub
 from zcore.testing.fixtures import (
     AppLifespan,
     ContainerSandbox,
@@ -16,6 +21,42 @@ from zcore.testing.fixtures import (
     UserContext,
     ZTest,
 )
+
+
+def setup_test_database(
+    metadata: Any | None = None,
+    db_url: str | None = None,
+    engine: AsyncEngine | None = None,
+    drop_first: bool = True,
+) -> None:
+    target_metadata = metadata or Base.metadata
+    target_url = db_url or getattr(
+        settings, "DATABASE_TEST_URL", "sqlite+aiosqlite:///zcore_test.db"
+    )
+
+    async def _recreate() -> None:
+        target_engine = engine
+        if target_engine is None:
+            if not getattr(db_manager, "_engine", None):
+                db_manager.init_app(db_url=target_url)
+            target_engine = db_manager._engine
+
+        if target_engine is not None:
+            async with target_engine.begin() as conn:
+                if drop_first:
+                    await conn.run_sync(target_metadata.drop_all)
+                await conn.run_sync(target_metadata.create_all)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(asyncio.run, _recreate()).result()
+    else:
+        asyncio.run(_recreate())
 
 
 class ZTestClient:
