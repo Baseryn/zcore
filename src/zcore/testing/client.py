@@ -1,3 +1,10 @@
+"""ZCore Test Client and Automated Test Harness Infrastructure.
+
+This module provides `ZTestClient` which wraps an ASGI application in a complete
+test harness supporting isolated transactions, clean dependency overrides, polymorphic
+identity simulation, event sandboxing, and zero-boilerplate schema generation.
+"""
+
 import asyncio
 import concurrent.futures
 import uuid
@@ -33,6 +40,17 @@ def setup_test_database(
     engine: AsyncEngine | None = None,
     drop_first: bool = True,
 ) -> None:
+    """Synchronously create or recreate test database tables across any execution context.
+
+    Automatically detects running event loops and executes table schema creation safely
+    to support Pytest session-level setup fixtures with zero boilerplate.
+
+    Args:
+        metadata: SQLAlchemy MetaData instance containing model tables. Defaults to Base.metadata.
+        db_url: Database connection URI. Defaults to Settings.DATABASE_TEST_URL.
+        engine: Pre-constructed AsyncEngine instance.
+        drop_first: If True, purges existing tables before recreation. Defaults to True.
+    """
     target_metadata = metadata or Base.metadata
     target_url = db_url or getattr(
         settings, "DATABASE_TEST_URL", "sqlite+aiosqlite:///zcore_test.db"
@@ -64,6 +82,12 @@ def setup_test_database(
 
 
 class ZTestClient:
+    """Asynchronous test client coordinating database transactions, context, and dependencies.
+
+    Enables testing of native ZCore or vanilla FastAPI applications with automated rollback
+    protection, authentication mocking, and event sandboxing.
+    """
+
     def __init__(
         self,
         app: FastAPI,
@@ -78,6 +102,21 @@ class ZTestClient:
         extra_context: dict[str, Any] | None = None,
         extra_user_attrs: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize the ZTestClient instance.
+
+        Args:
+            app: Target FastAPI application.
+            user_id: Polymorphic identifier for the authenticated user (int, str, UUID).
+            scopes: Security scopes to grant to the authenticated user.
+            is_superuser: Boolean indicating whether superuser privileges are active.
+            use_db: If True, wraps executions within transactional rollback savepoints.
+            engine: Custom AsyncEngine instance to use instead of the global database manager.
+            db_dependency: Single or sequence of database session dependencies to override.
+            user_dependency: Single or sequence of custom authentication dependencies to override.
+            user_model: Custom Pydantic model class to validate and instantiate the mock user.
+            extra_context: Key-value parameters to seed into the execution context store.
+            extra_user_attrs: Additional properties to populate on the mock user instance.
+        """
         self.app = app
         self._client: httpx.AsyncClient | None = None
 
@@ -151,6 +190,7 @@ class ZTestClient:
         self._orchestrator = ZTest(*fixtures)
 
     async def __aenter__(self) -> httpx.AsyncClient:
+        """Enter test scope, initialize sandbox fixtures, and return configured AsyncClient."""
         await self._orchestrator.setUp()
         self._client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
@@ -159,12 +199,15 @@ class ZTestClient:
         return self._client
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit test scope, close HTTP client, and trigger teardown on sandbox fixtures."""
         if self._client:
             await self._client.__aexit__(exc_type, exc_val, exc_tb)
         await self._orchestrator.tearDown()
 
 
 class BaseZTest(ABC):
+    """Declarative base class for structuring async test suites."""
+
     app: FastAPI = None
     user_id: Any = None
     is_active: bool = True
@@ -179,6 +222,7 @@ class BaseZTest(ABC):
 
     @asynccontextmanager
     async def run(self) -> AsyncGenerator[httpx.AsyncClient, None]:
+        """Execute test case inside an automated ZTestClient context manager."""
         user_id_val = self.user_id if self.user_id is not None else uuid.uuid4()
         async with ZTestClient(
             app=self.app,
