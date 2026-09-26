@@ -44,10 +44,21 @@ class LoggingSettings(BaseModel):
     backup_count: int = 5
     muted_loggers: list[str] = Field(
         default_factory=lambda: [
+            "sqlalchemy.engine",
+        ]
+    )
+    passthrough_loggers: list[str] = Field(
+        default_factory=lambda: [
             "uvicorn",
             "uvicorn.access",
             "uvicorn.error",
-            "sqlalchemy.engine",
+        ]
+    )
+    intercept_loggers: list[str] = Field(
+        default_factory=lambda: [
+            "uvicorn",
+            "uvicorn.access",
+            "uvicorn.error",
         ]
     )
     custom_processors: list[Any] = Field(default_factory=list)
