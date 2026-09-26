@@ -177,8 +177,8 @@ class ZTestClient:
                         for k, v in attrs.items():
                             setattr(self, k, v)
 
-                setattr(GenericMockUser, "is_superuser", is_superuser)
-                setattr(GenericMockUser, "scopes", scopes_list)
+                GenericMockUser.is_superuser = is_superuser
+                GenericMockUser.scopes = scopes_list
 
                 return GenericMockUser(extra_user_attrs or {})
 
