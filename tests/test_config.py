@@ -181,11 +181,16 @@ def test_logging_settings_model_defaults_and_custom() -> None:
     assert default_log.log_sql_queries is False
     assert default_log.slow_query_threshold_ms is None
     assert default_log.file_path is None
-    assert default_log.muted_loggers == [
+    assert default_log.muted_loggers == ["sqlalchemy.engine"]
+    assert default_log.passthrough_loggers == [
         "uvicorn",
         "uvicorn.access",
         "uvicorn.error",
-        "sqlalchemy.engine",
+    ]
+    assert default_log.intercept_loggers == [
+        "uvicorn",
+        "uvicorn.access",
+        "uvicorn.error",
     ]
     assert default_log.custom_processors == []
 

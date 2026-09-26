@@ -38,13 +38,17 @@ def test_logging_format_by_environment(
 
 
 def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
-    loggers = ["uvicorn", "uvicorn.access", "sqlalchemy.engine"]
-    dummy_handlers = {name: [logging.NullHandler()] for name in loggers}
+    monkeypatch.setattr(settings, "DEBUG", False)
 
-    for name in loggers:
+    intercept_loggers = ["uvicorn", "uvicorn.access", "uvicorn.error"]
+    for name in intercept_loggers:
         logger = logging.getLogger(name)
-        logger.handlers = list(dummy_handlers[name])
+        logger.handlers = [logging.NullHandler()]
         logger.propagate = False
+
+    muted_logger = logging.getLogger("sqlalchemy.engine")
+    muted_logger.handlers = [logging.NullHandler()]
+    muted_logger.propagate = True
 
     import zcore.logging.config as logging_config
     importlib.reload(logging_config)
@@ -52,10 +56,35 @@ def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch
     with patch("structlog.configure"):
         logging_config.setup_logging()
 
-    for name in loggers:
+    for name in intercept_loggers:
         logger = logging.getLogger(name)
         assert len(logger.handlers) == 0
         assert logger.propagate is True
+
+    assert len(muted_logger.handlers) == 0
+    assert muted_logger.propagate is False
+
+
+def test_passthrough_loggers_in_development_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "DEBUG", True)
+
+    passthrough_loggers = ["uvicorn", "uvicorn.access"]
+    dummy_handler = logging.NullHandler()
+    for name in passthrough_loggers:
+        logger = logging.getLogger(name)
+        logger.handlers = [dummy_handler]
+        logger.propagate = True
+
+    import zcore.logging.config as logging_config
+    importlib.reload(logging_config)
+
+    with patch("structlog.configure"):
+        logging_config.setup_logging()
+
+    for name in passthrough_loggers:
+        logger = logging.getLogger(name)
+        assert dummy_handler in logger.handlers
+        assert logger.propagate is False
 
 
 @pytest.mark.parametrize("rich_installed", [True, False])
