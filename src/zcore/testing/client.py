@@ -93,7 +93,7 @@ class BaseZTest(ABC):
 
     @asynccontextmanager
     async def run(self) -> AsyncGenerator[httpx.AsyncClient, None]:
-        user_id_val = self.user_id or uuid.uuid4()
+        user_id_val = self.user_id if self.user_id is not None else uuid.uuid4()
         async with ZTestClient(
             app=self.app,
             user_id=user_id_val,
