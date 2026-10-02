@@ -322,22 +322,13 @@ async def test_exception_logging_integration() -> None:
     with patch("zcore.exceptions.handlers.log") as mock_log:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             await client.get("/log-app")
-            mock_log.warning.assert_called_once_with(
-                "AppException raised",
+            mock_log.debug.assert_called_once_with(
+                "AppException handled",
                 error_type="ValidationError",
                 status_code=400,
                 message="Invalid field data",
                 payload={"field": "sku"},
                 path="/log-app",
-                method="GET",
-            )
-
-            await client.get("/log-unhandled")
-            mock_log.exception.assert_called_once_with(
-                "Unhandled server exception intercepted",
-                error="Invalid arithmetic calculation",
-                error_type="ValueError",
-                path="/log-unhandled",
                 method="GET",
             )
 

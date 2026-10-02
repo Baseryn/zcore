@@ -314,7 +314,7 @@ async def background_scope(
 
     Args:
         inherit_context: If True, clones active request context parameters into the background scope.
-        **custom_context: Explicit key-value pairs to set or override in the background context store.
+        **custom_context: Explicit key-value parameters to set or override in the background context store.
 
     Yields:
         None within an active, isolated execution scope.
@@ -329,6 +329,11 @@ async def background_scope(
     initial_store.update(custom_context)
     ctx_token = _request_context_store.set(initial_store)
 
+    prev_structlog_context = structlog.contextvars.get_contextvars()
+    if not inherit_context:
+        structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=scope_id)
+
     try:
         async with db_manager.session() as session:
             container.register_scoped_instance(AsyncSession, session)
@@ -337,6 +342,9 @@ async def background_scope(
         container.clear_scope(scope_id)
         _current_scope_id.reset(scope_token)
         _request_context_store.reset(ctx_token)
+        structlog.contextvars.clear_contextvars()
+        if prev_structlog_context:
+            structlog.contextvars.bind_contextvars(**prev_structlog_context)
 
 
 def background_task(func: Callable[..., Any]) -> Callable[..., Any]:

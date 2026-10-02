@@ -63,7 +63,7 @@ def init_cache(redis_url: str | None = None, **kwargs: Any) -> None:
             _shared_redis_client = aioredis.from_url(
                 redis_url, encoding="utf-8", decode_responses=True, **kwargs
             )
-            logger.info("Shared Redis cache client initialized successfully.")
+            logger.debug("Shared Redis cache client initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize shared Redis client: {e}")
 
@@ -95,13 +95,13 @@ async def close_cache() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _eviction_task
         _eviction_task = None
-        logger.info("Cache memory eviction loop stopped.")
+        logger.debug("Cache memory eviction loop stopped.")
 
     if _shared_redis_client:
         try:
             await _shared_redis_client.aclose()
             _shared_redis_client = None
-            logger.info("Shared Redis cache connection closed successfully.")
+            logger.debug("Shared Redis cache connection closed successfully.")
         except Exception as e:
             logger.error(f"Failed to cleanly close Redis cache: {e}")
 

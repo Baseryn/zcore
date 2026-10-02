@@ -2,7 +2,7 @@
 
 This module provides explicit exception handlers that normalize internal exceptions,
 Pydantic validation errors, Starlette/FastAPI HTTP exceptions, and unhandled errors
-into the unified ZCore `ResponseWrapper` envelope.
+into the unified ZCore `ResponseWrapper` envelope with quiet, non-intrusive logging for client errors.
 """
 
 from collections.abc import Sequence
@@ -81,7 +81,9 @@ def _sanitize_error_item(err: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-async def app_exception_handler(request: Request, exc: AppException) -> ZCoreJSONResponse:
+async def app_exception_handler(
+    request: Request, exc: AppException
+) -> ZCoreJSONResponse:
     """Handle custom domain-level `AppException` instances.
 
     Args:
@@ -91,8 +93,9 @@ async def app_exception_handler(request: Request, exc: AppException) -> ZCoreJSO
     Returns:
         Structured ZCoreJSONResponse enclosing the error details.
     """
-    log.warning(
-        "AppException raised",
+    log_func = log.debug if exc.status_code < 500 else log.error
+    log_func(
+        "AppException handled",
         error_type=type(exc).__name__,
         status_code=exc.status_code,
         message=exc.message,
@@ -136,8 +139,8 @@ async def request_validation_exception_handler(
     else:
         summary_message = "Request validation failed"
 
-    log.warning(
-        "Request validation failed",
+    log.debug(
+        "Request validation error",
         status_code=422,
         error_count=len(sanitized_errors),
         path=request.url.path,
@@ -174,8 +177,9 @@ async def http_exception_handler(
     """
     message = str(exc.detail) if exc.detail else "An HTTP error occurred"
 
-    log.warning(
-        "HTTPException raised",
+    log_func = log.debug if exc.status_code < 500 else log.error
+    log_func(
+        "HTTPException handled",
         status_code=exc.status_code,
         message=message,
         path=request.url.path,
