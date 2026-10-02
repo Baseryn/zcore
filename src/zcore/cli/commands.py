@@ -54,7 +54,7 @@ COMPONENT_TEMPLATES = {
     "services": ("services.py", SERVICE_TEMPLATE),
     "routers": ("routers.py", ROUTER_TEMPLATE),
     "plugin": ("plugin.py", PLUGIN_TEMPLATE),
-    "tests": ("tests.py", TEST_TEMPLATE),
+    "tests": ("test_{app_name}.py", TEST_TEMPLATE),
 }
 
 
@@ -252,18 +252,19 @@ def start_app(
 
     files_to_create = {"__init__.py": ""}
 
-    for comp_key, (filename, raw_template) in COMPONENT_TEMPLATES.items():
+    for comp_key, (filename_pattern, raw_template) in COMPONENT_TEMPLATES.items():
         if selected_components is not None and comp_key not in selected_components:
             continue
         if comp_key == "tests" and not with_test and selected_components is None:
             continue
 
+        resolved_filename = filename_pattern.format(**context)
         use_template = (
             comp_key in templated_components
             if templated_components is not None
             else with_template
         )
-        files_to_create[filename] = (
+        files_to_create[resolved_filename] = (
             raw_template.format(**context) if use_template else ""
         )
 
