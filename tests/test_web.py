@@ -83,7 +83,7 @@ class TargetService:
 
 class MockFullService:
     def __init__(self) -> None:
-        pass
+        self.deleted_ids: list[tuple[uuid.UUID, bool]] = []
 
     async def create(self, schema: DummyCreate) -> DummyOut:
         return DummyOut(id="123", name=schema.name, password="safe")
@@ -104,8 +104,8 @@ class MockFullService:
         name = schema.name if schema.name else "patched"
         return DummyOut(id=str(id), name=name, password="safe")
 
-    async def delete(self, id: uuid.UUID) -> None:
-        pass
+    async def delete(self, id: uuid.UUID, force: bool = False) -> None:
+        self.deleted_ids.append((id, force))
 
 
 def clean_endpoint_signature(endpoint: Any) -> Any:
@@ -138,15 +138,15 @@ def clean_endpoint_signature(endpoint: Any) -> Any:
     [
         (
             {"service": None},
-            "Service class must be defined"
+            "Service class must be defined",
         ),
         (
             {"service": MagicMock(), "create_schema": None, "exclude": set()},
-            "POST route is enabled"
+            "POST route is enabled",
         ),
         (
             {"service": MagicMock(), "create_schema": DummyCreate, "update_schema": None, "exclude": set()},
-            "UPDATE/PATCH route is enabled"
+            "UPDATE/PATCH route is enabled",
         ),
         (
             {
@@ -155,9 +155,9 @@ def clean_endpoint_signature(endpoint: Any) -> Any:
                 "update_schema": DummyUpdate,
                 "model": None,
             },
-            "Model class must be defined"
+            "Model class must be defined",
         ),
-    ]
+    ],
 )
 def test_router_auto_scaffolding_validation_errors(router_attrs: dict[str, Any], expected_error_msg: str) -> None:
     attrs = {
@@ -181,22 +181,22 @@ def test_router_auto_scaffolding_validation_errors(router_attrs: dict[str, Any],
             {"dummy.password", "resource.dummy.password"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA"},
-            ["Authorization", "Cookie"]
+            ["Authorization", "Cookie"],
         ),
         (
             set(),
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
-            []
-        )
-    ]
+            [],
+        ),
+    ],
 )
 async def test_router_schema_projection_pruning(
     monkeypatch: pytest.MonkeyPatch,
     restricted_fields: set[str],
     payload_in: dict[str, Any],
     expected_payload_out: dict[str, Any],
-    expected_vary: list[str]
+    expected_vary: list[str],
 ) -> None:
     original_add_api_route = APIRouter.add_api_route
 
@@ -224,7 +224,7 @@ async def test_router_schema_projection_pruning(
 
     router_inst = TargetRouter()
     app.include_router(router_inst.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/items/12345678-1234-5678-1234-567812345678")
         assert response.status_code == 200
@@ -246,7 +246,7 @@ async def test_router_schema_projection_pruning(
     [
         ("my-custom-request-id-123", False),
         (None, True),
-    ]
+    ],
 )
 async def test_request_id_middleware(custom_request_id: str | None, expect_valid_uuid: bool) -> None:
     app = FastAPI()
@@ -256,7 +256,7 @@ async def test_request_id_middleware(custom_request_id: str | None, expect_valid
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         headers = {}
         if custom_request_id:
@@ -297,27 +297,40 @@ async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> No
 
     r = FullCrudRouter()
     app.include_router(r.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.post("/crud/", json={"name": "new_item"})
         assert res.status_code == 201
         assert res.json()["data"]["name"] == "new_item"
-        res = await client.get("/crud/12345678-1234-5678-1234-567812345678")
+
+        target_uuid = "12345678-1234-5678-1234-567812345678"
+        res = await client.get(f"/crud/{target_uuid}")
         assert res.status_code == 200
         assert res.json()["data"]["name"] == "retrieved"
+
         res = await client.get("/crud/?page=2&size=10")
         assert res.status_code == 200
         assert res.json()["data"][0]["name"] == "n1"
         assert res.json()["meta"]["page"] == 2
+
         res = await client.post("/crud/search", json={"filters": [], "size": 10})
         assert res.status_code == 200
         assert res.json()["data"][0]["name"] == "search_res"
-        res = await client.patch("/crud/12345678-1234-5678-1234-567812345678", json={"name": "patched_item"})
+
+        res = await client.patch(f"/crud/{target_uuid}", json={"name": "patched_item"})
         assert res.status_code == 200
         assert res.json()["data"]["name"] == "patched_item"
-        res = await client.delete("/crud/12345678-1234-5678-1234-567812345678")
+
+        res = await client.delete(f"/crud/{target_uuid}")
         assert res.status_code == 200
         assert res.json()["message"] == "Deleted successfully"
+        assert len(service_inst.deleted_ids) == 1
+        assert service_inst.deleted_ids[0] == (uuid.UUID(target_uuid), False)
+
+        res_force = await client.delete(f"/crud/{target_uuid}?force=true")
+        assert res_force.status_code == 200
+        assert len(service_inst.deleted_ids) == 2
+        assert service_inst.deleted_ids[1] == (uuid.UUID(target_uuid), True)
 
 
 @pytest.mark.anyio
@@ -329,7 +342,7 @@ async def test_router_exception_translation_handler() -> None:
     async def raise_error() -> None:
         raise EntityNotFound(message="Missing item", payload={"key": "val"})
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/error")
         assert res.status_code == 404
@@ -377,7 +390,7 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     r = ExposureRouter()
     app.include_router(r.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res_post = await client.post("/exposure/?schema=true")
         assert res_post.status_code == 200
@@ -395,7 +408,7 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         "a" * 70,
         "inject<script>",
         "bad_char$",
-    ]
+    ],
 )
 async def test_request_id_validation_pattern(bad_id: str) -> None:
     app = FastAPI()
@@ -405,7 +418,7 @@ async def test_request_id_validation_pattern(bad_id: str) -> None:
     def root() -> dict[str, Any]:
         return {}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/", headers={"x-request-id": bad_id})
         res_id = res.headers.get("x-request-id")
@@ -431,7 +444,7 @@ async def test_scoped_dependency_middleware_lifecycle(monkeypatch: pytest.Monkey
         registered_session = container.resolve(AsyncSession)
         return {"scope_id": scope_id, "session_is_mock": registered_session is mock_session}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/scoped")
         assert res.status_code == 200
@@ -653,7 +666,7 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
         return {"status": "ok"}
 
     with patch("zcore.web.middleware.log.info") as mock_log_info:
-        transport = ASGITransport(app=app, client=("192.168.1.50", 54321))
+        transport = ASGITransport(app=app, client=("192.168.1.50", 54321), raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             res = await client.get("/status-test")
             assert res.status_code == 200

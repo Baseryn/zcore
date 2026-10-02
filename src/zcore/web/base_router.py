@@ -425,9 +425,10 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
 
             async def _delete_endpoint(
                 id: target_pk_type,
+                force: bool = False,
                 service_inst: BaseService = service_dependency,
             ) -> ResponseWrapper:
-                return await self.delete_endpoint(id, service_inst)
+                return await self.delete_endpoint(id, service_inst, force=force)
 
             self.router.add_api_route(
                 path=pk_path,
@@ -557,16 +558,17 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         return ResponseWrapper(data=data)
 
     async def delete_endpoint(
-        self, id: Any, service: BaseService
+        self, id: Any, service: BaseService, force: bool = False
     ) -> ResponseWrapper:
         """Execute a single-record delete transaction.
 
         Args:
             id: Target entity identifier to delete.
             service: Active business service instance.
+            force: If True, triggers permanent hard deletion. Defaults to False.
 
         Returns:
             A success response wrapped in a ResponseWrapper.
         """
-        await service.delete(id)
+        await service.delete(id, force=force)
         return ResponseWrapper(message="Deleted successfully")
