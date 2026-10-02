@@ -34,11 +34,13 @@
 While FastAPI provides a high-performance engine for HTTP, it leaves the architecture of medium-to-large applications entirely to the developer. ZCore fills that gap with:
 
 - **🔐 Context-Aware Data Masking** — Write one schema; sensitive fields are automatically pruned per-user across validation, serialization, and OpenAPI specs.
+- **🛡️ Built-in Soft-Delete & Atomic Restore** — Model-level query scoping, batch restoration (`restore_multi`), and hard-delete bypasses (`?force=true`).
 - **🔗 Atomic Unit of Work** — Coordinate multi-repository operations into all-or-nothing transactions with deferred event dispatching.
 - **⚡ Scoped Dependency Injection** — High-performance constructor auto-wiring for Singleton, Transient, and request-scoped dependencies.
+- **🚨 Unified Error Normalization** — Standardized JSON error envelopes across domain errors, 422 validations, and 500 runtime exceptions with debug-gated diagnostics.
 - **🏗️ Modular Plugin Architecture** — Organize business domains into decoupled plugins with topological dependency ordering.
-- **🔍 Secure Dynamic Search Engine** — Nested JSON filters, eager loading, cursor/offset pagination, and column-level access controls.
-- **📦 Interactive TUI & Scaffolding Engine** — Context-aware terminal dashboard, lightning-fast `uv` virtualenv orchestration, and granular layer-by-layer domain generators.
+- **🔍 Secure Dynamic Search Engine** — Nested JSON filters, inverted operators, logical `not` groups, field projection, eager loading, and column-level access controls.
+- **📦 Interactive TUI & Scaffolding Engine** — Context-aware terminal dashboard, cascading server runners with transparent Uvicorn forwarding, and granular layer-by-layer domain generators.
 
 ---
 
@@ -46,12 +48,14 @@ While FastAPI provides a high-performance engine for HTTP, it leaves the archite
 
 | Concern | Raw FastAPI | With ZCore |
 |---------|-------------|------------|
-| **Endpoint Scaffolding** | Manually write 7+ routes and handlers per model | One `BaseRouter` class → 7 secure endpoints out-of-the-box |
+| **Endpoint Scaffolding** | Manually write 8+ routes and handlers per model | One `BaseRouter` class → 8 secure endpoints (CRUD + Search + Lookup) out-of-the-box |
 | **Data Leakage** | Multiple Pydantic models per role; manual conditionals | `Zchema` auto-prunes restricted fields per active context |
 | **Database Transactions** | Scattered `commit()` / `rollback()` calls | `UnitOfWork` guarantees atomicity + post-commit domain events |
+| **Soft Delete & Recovery** | Manual `WHERE deleted_at IS NULL` per query | `SoftDeleteMixin` + automatic query scoping + atomic `restore()` / `restore_multi()` |
 | **Dependency Wiring** | Deeply nested, verbose `Depends()` parameter chains | Clean constructor auto-wiring via IoC container + `Inject[T]` |
-| **Search & Pagination** | Hand-crafted SQL parsing per endpoint | Declarative JSON filters + keyset cursor and offset pagination |
-| **Project Tooling & Layout** | Manual folder creation, fragmented glue scripts | `zc` interactive TUI with auto `uv` setup & granular layer picking |
+| **Error Handling** | Fragmented exception formats across handlers | Unified `ResponseWrapper` normalization with debug-gated protection |
+| **Search & Pagination** | Hand-crafted SQL parsing per endpoint | Declarative JSON filters (including `not_*` operators) + keyset cursor and offset pagination |
+| **Project Tooling & Layout** | Manual folder creation, fragmented glue scripts | `zc` interactive TUI with auto `uv` setup & cascading server runner |
 | **Startup Orchestration** | Fragile `@app.on_event` chains | `Plugin` protocol with dependency DAG → topological sorting |
 
 ---
@@ -101,7 +105,7 @@ class Task(Base):
 zc run
 ```
 
-Your API is live at **`http://127.0.0.1:8000`** with 7 secure endpoints (CRUD + Dynamic Search) ready.
+Your API is live at **`http://127.0.0.1:8000`** with 8 secure endpoints (CRUD + Dynamic Search + Field-Projected Lookups) ready.
 
 > 📖 **Full walkthrough:** [Quick Start Guide](https://zcore.baseryn.com/docs/quick-start)
 
@@ -189,10 +193,10 @@ class TasksPlugin(Plugin):
 </details>
 
 <details>
-<summary><strong>🔍 Secure Dynamic Search Engine</strong></summary>
+<summary><strong>🔍 Secure Dynamic Search Engine & Lookups</strong></summary>
 <br>
 
-A dynamic query builder that translates nested JSON filters into safe SQLAlchemy 2.0 AST queries — featuring relation eager-loading, keyset cursor pagination, and depth-limit protection against DoS attacks.
+A dynamic query builder that translates nested JSON filters into safe SQLAlchemy 2.0 AST queries — featuring inverted operators (`not_like`, `not_in`, `not_between`), logical `not` grouping, relation eager-loading, keyset cursor pagination, and depth-limit protection against DoS attacks.
 
 ```json
 {
@@ -201,7 +205,13 @@ A dynamic query builder that translates nested JSON filters into safe SQLAlchemy
       "op": "and",
       "items": [
         { "field": "is_completed", "op": "eq", "value": false },
-        { "field": "title", "op": "ilike", "value": "urgent" }
+        { "field": "title", "op": "not_contains", "value": "draft" }
+      ]
+    },
+    {
+      "op": "not",
+      "items": [
+        { "field": "status", "op": "in", "value": ["archived", "cancelled"] }
       ]
     }
   ],
@@ -222,6 +232,7 @@ A dynamic query builder that translates nested JSON filters into safe SQLAlchemy
 The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered by Questionary and Rich. It features:
 
 * **Workspace & Context Awareness:** Detects whether you are inside an active project, in a root workspace containing multiple services, or starting fresh.
+* **Cascading Server Runner (`zc run`):** Hierarchical configuration precedence (`CLI Arguments > .env File > Defaults`) with transparent passthrough for arbitrary Uvicorn options.
 * **Automated `uv` / `.venv` Setup:** Initializes isolated virtual environments and installs dependencies automatically using `uv` (recommended) or standard `pip`.
 * **Multi-Engine Driver Bootstrapping:** Configures SQLite (`aiosqlite`), PostgreSQL (`asyncpg`), or MySQL (`aiomysql`) in `.env` and `requirements.txt` out-of-the-box.
 * **Granular Architectural Scaffolding:** Generates modular domain apps in 3 modes (*Full Boilerplate*, *Clean/Blank*, or *Custom Layer Selection* across Models, Schemas, Repositories, Services, Routers, Plugins, and Pytest suites).
@@ -229,7 +240,7 @@ The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered
 ```text
 $ zc
 
-⚡ ZCore Framework vrc.2 • Modern Modular Monolith
+⚡ ZCore Framework v0.1.0-rc.2 • Modern Modular Monolith
  FastAPI • SQLAlchemy 2.0 • Pydantic V2
 
 ? What framework task would you like to perform? 📦 init — Scaffold a new full ZCore project
@@ -249,7 +260,7 @@ $ zc
 | `zc` | ✅ | — | Launch interactive orchestration dashboard |
 | `zc init [name]` | ✅ | `--db [sqlite\|postgres\|mysql]`, `-y` | Bootstrap a new project with settings, `.env`, and dependencies |
 | `zc startapp [name]` | ✅ | `--template / --no-template`, `--test / --no-test`, `-y` | Scaffold domain modules with granular layer selection |
-| `zc run` | ✅ | — | Launch local Uvicorn dev server with auto-reload |
+| `zc run [app]` | ✅ | `--host`, `--port`, `--reload / --no-reload`, `--workers`, `--log-level`, `--env-file` | Launch server with cascading configuration hierarchy & Uvicorn forwarding |
 | `zc gensecret` | — | — | Generate a 64-character cryptographically secure `SECRET_KEY` |
 | `zc genenv` | ✅ | `-o <output>`, `-f / --force` | Introspect active `Settings` classes and scaffold `.env.example` |
 </details>
