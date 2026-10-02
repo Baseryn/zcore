@@ -734,3 +734,84 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
         assert log_kwargs["path"] == "/status-test"
         assert log_kwargs["method"] == "GET"
         assert "duration_ms" in log_kwargs
+
+
+@pytest.mark.anyio
+async def test_router_lookup_projection_with_sqlalchemy_model() -> None:
+    class RealLookupModel(Base):
+        __tablename__ = f"lookup_model_{uuid.uuid4().hex[:6]}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        name = Column(Integer)
+        is_active = Column(Integer)
+        secret_code = Column(Integer)
+
+    class CustomLookupOut(BaseModel):
+        id: uuid.UUID
+        name: int
+        is_active: int
+
+    class DummyService:
+        pass
+
+    class DynamicLookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = RealLookupModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = CustomLookupOut
+        allowed_lookup_fields: ClassVar[set[str]] = {"name"}
+        service = DummyService
+        prefix = "/dynamic-lookup"
+
+    router_inst = DynamicLookupRouter()
+    load_fields, loader_options = router_inst._resolve_lookup_projections()
+
+    assert load_fields is not None
+    loaded_column_names = {col.key for col in load_fields}
+    assert "id" in loaded_column_names
+    assert "name" in loaded_column_names
+    assert "is_active" in loaded_column_names
+    assert "secret_code" not in loaded_column_names
+    assert loader_options is None
+
+
+@pytest.mark.anyio
+async def test_router_lookup_projection_relationship_eager_loading() -> None:
+    from sqlalchemy import ForeignKey
+    from sqlalchemy.orm import relationship
+
+    table_suffix = uuid.uuid4().hex[:6]
+
+    class ParentModel(Base):
+        __tablename__ = f"parent_{table_suffix}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        name = Column(Integer)
+
+    class ChildModel(Base):
+        __tablename__ = f"child_{table_suffix}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        parent_id = Column(Uuid, ForeignKey(f"parent_{table_suffix}.id"))
+        parent = relationship("ParentModel")
+
+    class ChildLookupOut(BaseModel):
+        id: uuid.UUID
+        parent: Any
+
+    class DummyService:
+        pass
+
+    class RelationalLookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = ChildModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = ChildLookupOut
+        service = DummyService
+        prefix = "/rel-lookup"
+
+    router_inst = RelationalLookupRouter()
+    load_fields, loader_options = router_inst._resolve_lookup_projections()
+
+    assert load_fields is not None
+    assert loader_options is not None
+    assert len(loader_options) == 1

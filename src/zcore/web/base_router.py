@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, status
 from fastapi.params import Depends as DependsClass
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
+from sqlalchemy import inspect
+from sqlalchemy.orm import joinedload, selectinload
 
 from zcore.config import settings
 from zcore.db.search import SearchRequest
@@ -122,8 +124,6 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
 
         if getattr(self, "model", None) is not None:
             try:
-                from sqlalchemy import inspect
-
                 mapper = inspect(self.model)
                 if mapper.primary_key:
                     pk_col = mapper.primary_key[0]
@@ -273,7 +273,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         return self._normalize_dependencies(dependencies)
 
     def _get_effective_lookup_fields(self) -> set[str]:
-        """Resolve the effective whitelist of column fields for lookup queries.
+        """Resolve the effective whitelist of filterable and sortable fields for lookup queries.
 
         Returns:
             A set of allowed field names extracted from explicit configurations or the lookup schema.
@@ -285,6 +285,57 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             return set(self.lookup_schema.model_fields.keys())
 
         return set()
+
+    def _resolve_lookup_projections(self) -> tuple[list[Any] | None, list[Any] | None]:
+        """Resolve database columns and relationship loader strategies required by the lookup schema.
+
+        Returns:
+            A tuple containing the list of column attributes to load and executable loader options.
+        """
+        if not self.lookup_schema or not self.model:
+            return None, None
+
+        schema_fields = (
+            set(self.lookup_schema.model_fields.keys())
+            if hasattr(self.lookup_schema, "model_fields")
+            else set()
+        )
+        if not schema_fields:
+            return None, None
+
+        try:
+            mapper = inspect(self.model)
+        except Exception:
+            return None, None
+
+        column_keys = {col.key for col in mapper.columns}
+        relationship_map = {rel.key: rel for rel in mapper.relationships}
+
+        load_columns: list[Any] = []
+        for pk_col in mapper.primary_key:
+            pk_attr = getattr(self.model, pk_col.key, None)
+            if pk_attr is not None:
+                load_columns.append(pk_attr)
+
+        loader_options: list[Any] = []
+
+        for field_name in schema_fields:
+            if field_name in column_keys:
+                col_attr = getattr(self.model, field_name, None)
+                if col_attr is not None and col_attr not in load_columns:
+                    load_columns.append(col_attr)
+            elif field_name in relationship_map:
+                rel = relationship_map[field_name]
+                rel_attr = getattr(self.model, field_name, None)
+                if rel_attr is not None:
+                    loader_options.append(
+                        selectinload(rel_attr) if rel.uselist else joinedload(rel_attr)
+                    )
+
+        return (
+            load_columns if load_columns else None,
+            loader_options if loader_options else None,
+        )
 
     def _validate_lookup_request(
         self, search_in: SearchRequest, allowed_fields: set[str]
@@ -638,12 +689,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         effective_size = min(search_in.size or default_limit, max_limit)
         search_in.size = effective_size
 
-        load_fields = []
-        if allowed_fields and self.model:
-            for field_name in allowed_fields:
-                col = getattr(self.model, field_name, None)
-                if col is not None:
-                    load_fields.append(col)
+        load_fields, loader_options = self._resolve_lookup_projections()
 
         pagination = None
         if self.pagination_class:
@@ -661,7 +707,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         result = await service.search(
             search_in,
             pagination=pagination,
-            fields=load_fields if load_fields else None,
+            fields=load_fields,
+            options=loader_options,
         )
         from zcore.db.pagination import PaginatedResult
 
