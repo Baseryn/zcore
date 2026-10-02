@@ -18,7 +18,7 @@ from zcore.context.context import ZContext
 from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
-from zcore.exceptions.handlers import app_exception_handler
+from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
 from zcore.kernel.di import _current_scope_id, container
 from zcore.utils.timezone import get_app_timezone
 from zcore.web.api_router import ZCoreRequest
@@ -37,6 +37,7 @@ class DummyModel:
         mock_actions.CREATE = "dummy:create"
         mock_actions.VIEW = "dummy:view"
         mock_actions.LISTVIEW = "dummy:listview"
+        mock_actions.LOOKUP = "dummy:lookup"
         mock_actions.UPDATE = "dummy:update"
         mock_actions.DELETE = "dummy:delete"
         return mock_actions
@@ -47,6 +48,11 @@ class DummyCreate(BaseModel):
 
 
 class DummyUpdate(BaseModel):
+    name: str
+
+
+class DummyLookup(BaseModel):
+    id: str
     name: str
 
 
@@ -97,7 +103,7 @@ class MockFullService:
             return PaginatedResult(data=data, meta={"total": 1, "page": pagination.page})
         return data
 
-    async def search(self, search_in: Any, pagination: Any = None) -> Any:
+    async def search(self, search_in: Any, pagination: Any = None, fields: Any = None, options: Any = None) -> Any:
         return [DummyOut(id="1", name="search_res", password="s1")]
 
     async def update(self, id: uuid.UUID, schema: DummyUpdate, partial: bool = False) -> DummyOut:
@@ -331,6 +337,52 @@ async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> No
         assert res_force.status_code == 200
         assert len(service_inst.deleted_ids) == 2
         assert service_inst.deleted_ids[1] == (uuid.UUID(target_uuid), True)
+
+
+@pytest.mark.anyio
+async def test_router_lookup_endpoint_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_add_api_route = APIRouter.add_api_route
+
+    def patched_add_api_route(self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any) -> Any:
+        return original_add_api_route(self, path, clean_endpoint_signature(endpoint), *args, **kwargs)
+
+    monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    service_inst = MockFullService()
+    container.register_singleton(MockFullService, service_inst)
+
+    class LookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = DummyLookup
+        allowed_lookup_fields: ClassVar[set[str]] = {"id", "name"}
+        max_lookup_size = 50
+        service = MockFullService
+        prefix = "/lookup-test"
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = LookupRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        valid_res = await client.post("/lookup-test/lookup", json={"filters": [{"field": "name", "op": "eq", "value": "test"}], "size": 20})
+        assert valid_res.status_code == 200
+        body = valid_res.json()
+        assert body["success"] is True
+        assert isinstance(body["data"], list)
+
+        invalid_res = await client.post("/lookup-test/lookup", json={"filters": [{"field": "unauthorized_field", "op": "eq", "value": "test"}]})
+        assert invalid_res.status_code == 400
+        invalid_body = invalid_res.json()
+        assert invalid_body["success"] is False
+        assert "not permitted in lookup" in invalid_body["message"]
 
 
 @pytest.mark.anyio
@@ -596,17 +648,21 @@ def test_base_router_weighted_route_specificity_sorting() -> None:
         create_schema = DummyCreate
         update_schema = DummyUpdate
         schema_out = DummyOut
+        lookup_schema = DummyLookup
         service = DummyService
         prefix = "/api/items"
 
     router_inst = SpecificityRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/api/items/search" in paths
+    assert "/api/items/lookup" in paths
     assert "/api/items/{id:uuid}" in paths
 
     idx_search = paths.index("/api/items/search")
+    idx_lookup = paths.index("/api/items/lookup")
     idx_dynamic = paths.index("/api/items/{id:uuid}")
     assert idx_search < idx_dynamic
+    assert idx_lookup < idx_dynamic
 
 
 def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,7 +32,7 @@ from zcore.utils.helpers import json_dumps, json_loads
 class Actions:
     """Action permission mappings tied to a specific database model.
 
-    This immutable container maps standard CRUD/view operational concepts to unique
+    This immutable container maps standard CRUD/view and lookup operational concepts to unique
     permission keys for use in security policy evaluation.
 
     Attributes:
@@ -41,6 +41,7 @@ class Actions:
         CREATE: Security action key for generating a new model entity.
         UPDATE: Security action key for updating an existing model entity.
         DELETE: Security action key for removing a model entity.
+        LOOKUP: Security action key for minimal relational reference queries.
     """
 
     LISTVIEW: str
@@ -48,6 +49,7 @@ class Actions:
     CREATE: str
     UPDATE: str
     DELETE: str
+    LOOKUP: str
 
     @classmethod
     def actions(cls, t_name: str) -> "Actions":

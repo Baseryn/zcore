@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import load_only
 
 from zcore.context.context import ctx
 from zcore.db.pagination import CursorParams, PageNumberParams
@@ -312,6 +313,19 @@ async def test_repo_search_engine_complex(db_session: Any) -> None:
     res = await repo.search(req)
     assert len(res) == 1
     assert res[0].name == "Banana"
+
+
+@pytest.mark.anyio
+async def test_repo_search_with_fields_and_options(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="LookupItem1", description="DeepDescription1"))
+    await repo.create(RepoTestCreateSchema(name="LookupItem2", description="DeepDescription2"))
+
+    req = SearchRequest(filters=[FilterItem(field="name", op="startswith", value="Lookup")])
+    res = await repo.search(req, fields=[RepoTestModel.id, RepoTestModel.name], options=[load_only(RepoTestModel.name)])
+    assert len(res) == 2
+    assert res[0].name == "LookupItem1"
+    assert res[1].name == "LookupItem2"
 
 
 @pytest.mark.anyio
