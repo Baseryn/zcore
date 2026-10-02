@@ -5,8 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
-from zcore import Kernel, db_manager, register_db_event_dispatcher, settings
-from zcore.exceptions import AppException, app_exception_handler
+from zcore import Kernel, db_manager, register_db_event_dispatcher, register_exception_handlers, settings
 from zcore.logging import setup_logging
 from zcore.web import RequestLogMiddleware, ScopedDependencyMiddleware
 
@@ -27,14 +26,14 @@ kernel.setup(app)
 app.add_middleware(RequestLogMiddleware)
 app.add_middleware(ScopedDependencyMiddleware)
 
-app.add_exception_handler(AppException, app_exception_handler)
+register_exception_handlers(app)
 
 @app.get("/")
 async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
-        "version": "0.1.0-rc.1",
+        "version": "0.1.0-rc.2",
         "debug": settings.DEBUG
     }
 """
