@@ -15,6 +15,7 @@ from fastapi.params import Depends as DependsClass
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
+from zcore.config import settings
 from zcore.db.search import SearchRequest
 from zcore.exceptions.base import ValidationError
 from zcore.kernel.di import Injector
@@ -58,6 +59,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         lookup_schema: Minimal schema class representing relational reference lookups.
         allowed_lookup_fields: Explicit whitelist of filterable/sortable fields for lookup queries.
         max_lookup_size: Maximum records threshold allowed in lookup responses.
+        max_page_size: Maximum records threshold allowed across general list queries.
+        default_page_size: Fallback record count when not specified in query requests.
         service: Business service callable class.
         pk_type: Optional explicit primary key type. If None, auto-resolved from model metadata.
         prefix: Path prefix representing the route.
@@ -74,7 +77,9 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     schema_out: type[BaseModel] | None = None
     lookup_schema: type[BaseModel] | None = None
     allowed_lookup_fields: set[str] | None = None
-    max_lookup_size: int = 100
+    max_lookup_size: int | None = None
+    max_page_size: int | None = None
+    default_page_size: int | None = None
     service: Any = None
     pk_type: type[Any] | None = None
 
@@ -581,10 +586,23 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         if self.pagination_class:
             from zcore.db.pagination import CursorParams, PageNumberParams
 
+            default_size = self.default_page_size or getattr(
+                settings, "PAGINATION_DEFAULT_SIZE", 20
+            )
+            max_size = self.max_page_size or getattr(
+                settings, "PAGINATION_MAX_SIZE", 100
+            )
+
+            effective_size = min(search_in.size or default_size, max_size)
+
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
+                pagination = CursorParams(
+                    cursor=search_in.cursor, size=effective_size
+                )
             else:
-                pagination = PageNumberParams(page=search_in.page, size=search_in.size)
+                pagination = PageNumberParams(
+                    page=search_in.page, size=effective_size
+                )
 
         result = await service.search(search_in, pagination)
         from zcore.db.pagination import PaginatedResult
@@ -608,7 +626,16 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         allowed_fields = self._get_effective_lookup_fields()
         self._validate_lookup_request(search_in, allowed_fields)
 
-        effective_size = min(search_in.size or 20, self.max_lookup_size)
+        max_limit = (
+            self.max_lookup_size
+            or self.max_page_size
+            or getattr(settings, "PAGINATION_MAX_SIZE", 100)
+        )
+        default_limit = self.default_page_size or getattr(
+            settings, "PAGINATION_DEFAULT_SIZE", 20
+        )
+
+        effective_size = min(search_in.size or default_limit, max_limit)
         search_in.size = effective_size
 
         load_fields = []
@@ -623,9 +650,13 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             from zcore.db.pagination import CursorParams, PageNumberParams
 
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
+                pagination = CursorParams(
+                    cursor=search_in.cursor, size=search_in.size
+                )
             else:
-                pagination = PageNumberParams(page=search_in.page, size=search_in.size)
+                pagination = PageNumberParams(
+                    page=search_in.page, size=search_in.size
+                )
 
         result = await service.search(
             search_in,

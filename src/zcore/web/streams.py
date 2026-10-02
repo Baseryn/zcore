@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 
+from zcore.config import settings
 from zcore.utils.helpers import json_dumps, json_loads
 
 logger = structlog.get_logger()
@@ -109,16 +110,14 @@ class StreamManager:
     async def subscribe(self, user_id: uuid.UUID) -> asyncio.Queue[Any]:
         """Subscribe a user, returning a bounded async listener queue.
 
-        Initializes background Redis listeners if this is the first active subscription
-        for a user in this node.
-
         Args:
             user_id: The target user identifier key.
 
         Returns:
             A bounded asyncio Queue configured to receive events.
         """
-        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=100)
+        queue_maxsize = getattr(settings, "STREAM_QUEUE_MAXSIZE", 100)
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         async with self._lock:
             if user_id not in self.users_queues:
                 self.users_queues[user_id] = []

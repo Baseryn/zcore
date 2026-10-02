@@ -3,7 +3,7 @@
 This module provides a unified cache manager supporting distributed caching (via Redis)
 with an asynchronous, thread-safe local fallback (via `TTLLRUCache`). It coordinates
 global cache lifecycles, structured serialization and deserialization, and automatically
-spawns background memory eviction routines safely within active event loops.
+spawns background memory eviction routines safely within active event loops based on dynamic settings.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ import structlog
 from pydantic import BaseModel
 
 from zcore.cache.ttllru_cache import TTLLRUCache
+from zcore.config import settings
 from zcore.utils.helpers import json_dumps, json_loads
 
 T = TypeVar("T")
@@ -30,28 +31,26 @@ _shared_redis_client: Any | None = None
 _eviction_task: asyncio.Task | None = None
 
 
-def _ensure_eviction_task(interval: int = 60) -> None:
+def _ensure_eviction_task(interval: int | None = None) -> None:
     """Schedule the background memory eviction task if an active event loop is running.
 
     Args:
         interval: Rest period duration in seconds between garbage collection sweeps.
-            Defaults to 60.
     """
     global _eviction_task
+    effective_interval = interval or getattr(settings, "CACHE_EVICTION_INTERVAL", 60)
     try:
         loop = asyncio.get_running_loop()
         if _eviction_task is None or _eviction_task.done():
-            _eviction_task = loop.create_task(_start_eviction_loop(interval=interval))
+            _eviction_task = loop.create_task(
+                _start_eviction_loop(interval=effective_interval)
+            )
     except RuntimeError:
         pass
 
 
 def init_cache(redis_url: str | None = None, **kwargs: Any) -> None:
     """Initialize global distributed caching clients and local eviction workers.
-
-    Configures a shared Redis connection client if library support and server configurations
-    are available. In addition, attempts to schedule the active background memory eviction worker
-    loop if an event loop is currently active.
 
     Args:
         redis_url: Connection URL pointing to a Redis server instance. Defaults to None.
@@ -76,7 +75,6 @@ async def _start_eviction_loop(interval: int = 60) -> None:
 
     Args:
         interval: Rest period duration in seconds between garbage collection sweeps.
-            Defaults to 60.
     """
     while True:
         try:
@@ -111,23 +109,33 @@ async def close_cache() -> None:
 class BaseCache(Generic[T]):
     """Generic base cache interface with transparent distributed and local fallbacks.
 
-    Keys set or read through this interface are auto-serialized and prefixed.
-    It communicates with Redis directly if initialized, falling back cleanly onto a
-    local `TTLLRUCache` memory store on connection failures or missing client pools.
-
     Attributes:
         prefix: Namespace prefix applied to all keys managed by this instance.
+        default_ttl: Fallback lifespan for stored cache records.
         _local_cache: Thread-safe local cache backup.
     """
 
-    def __init__(self, prefix: str) -> None:
+    def __init__(
+        self,
+        prefix: str,
+        local_maxsize: int | None = None,
+        default_ttl: int | None = None,
+    ) -> None:
         """Initialize a BaseCache instance.
 
         Args:
             prefix: Dot-path or identifier namespace prefix used to scope keys.
+            local_maxsize: Optional maximum entries allowed in the local fallback store.
+            default_ttl: Optional default expiration limit in seconds.
         """
         self.prefix = prefix
-        self._local_cache = TTLLRUCache(maxsize=1000)
+        self.default_ttl = default_ttl or getattr(
+            settings, "CACHE_DEFAULT_TTL", 3600
+        )
+        effective_maxsize = local_maxsize or getattr(
+            settings, "CACHE_LOCAL_MAXSIZE", 1000
+        )
+        self._local_cache = TTLLRUCache(maxsize=effective_maxsize)
 
     @property
     def redis_client(self) -> Any:
@@ -153,10 +161,6 @@ class BaseCache(Generic[T]):
         self, key: str, target_type: type[BaseModel] | None = None
     ) -> T | BaseModel | Any | None:
         """Retrieve and deserialize a cache record by its key.
-
-        Looks up key records from the distributed Redis client first, falling back to
-        the local memory store if missing or unreachable. Decodes JSON values and
-        validates them against optional target Pydantic schemas.
 
         Args:
             key: The unique identifier key query.
@@ -186,7 +190,9 @@ class BaseCache(Generic[T]):
 
         try:
             parsed_data = (
-                json_loads(raw_val) if isinstance(raw_val, (str, bytes)) else raw_val
+                json_loads(raw_val)
+                if isinstance(raw_val, (str, bytes))
+                else raw_val
             )
 
             if target_type and issubclass(target_type, BaseModel):
@@ -197,18 +203,16 @@ class BaseCache(Generic[T]):
             logger.error(f"Failed to deserialize cache key '{full_key}': {e}")
             return None
 
-    async def set(self, key: str, value: T, ttl: int = 3600) -> None:
+    async def set(self, key: str, value: T, ttl: int | None = None) -> None:
         """Serialize and persist a key-value record with a Time-To-Live (TTL).
-
-        Stores the serialized string payload in Redis if available, or caches
-        it locally in the thread-safe fallback memory buffer.
 
         Args:
             key: The unique identifier key to populate.
             value: The data payload to serialize and cache.
-            ttl: Maximum cache duration in seconds. Defaults to 3600.
+            ttl: Maximum cache duration in seconds. Defaults to instance default_ttl.
         """
         _ensure_eviction_task()
+        effective_ttl = ttl if ttl is not None else self.default_ttl
         full_key = self._get_key(key)
         client = self.redis_client
 
@@ -216,12 +220,12 @@ class BaseCache(Generic[T]):
 
         if client:
             try:
-                await client.set(full_key, serialized_val, ex=ttl)
+                await client.set(full_key, serialized_val, ex=effective_ttl)
                 return
             except Exception as e:
                 logger.error(f"Redis set failed in '{self.prefix}': {e}")
 
-        self._local_cache.set(full_key, serialized_val, ttl=ttl)
+        self._local_cache.set(full_key, serialized_val, ttl=effective_ttl)
 
     async def delete(self, key: str) -> None:
         """Evict a record from both distributed and fallback caches.
