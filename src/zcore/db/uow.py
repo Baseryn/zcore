@@ -1,8 +1,9 @@
 """Unit of Work Pattern Implementation.
 
-This module coordinates transactional business boundaries, ensuring that change sets
-are executed or discarded atomically and that domain events are decoupled from commit
-operations by delaying dispatch until database transactions succeed.
+This module coordinates transactional business boundaries across distributed and
+modular monolith services. It supports re-entrant and nested execution scopes through
+depth-aware propagation, ensuring that changes are committed atomically by the root
+boundary while buffering domain events until transactions succeed.
 """
 
 from typing import Any
@@ -19,14 +20,14 @@ class UnitOfWork:
     """Coordinates database commits and buffers associated application domain events.
 
     Ensures that domain events are only dispatched after their associated database
-    modifications have successfully committed. Implements the asynchronous context manager
-    protocol to automate transactional commit and rollback behaviors.
+    modifications have successfully committed. Implements re-entrant depth-aware
+    context management to safely coordinate nested transactions across independent
+    domain modules.
 
     Attributes:
         session: The underlying asynchronous database connection.
         dispatcher: The central system dispatcher used for publishing events.
-        _pending_events: A list of buffered tuple events (event_name, payload) awaiting
-            successful commit.
+        _pending_events: Direct reference to accumulated domain events awaiting dispatch.
     """
 
     def __init__(self, session: AsyncSession, dispatcher: EventDispatcher) -> None:
@@ -38,10 +39,20 @@ class UnitOfWork:
         """
         self.session = session
         self.dispatcher = dispatcher
-        self._pending_events: list[tuple[str, Any]] = []
+
+        if not isinstance(getattr(self.session, "info", None), dict):
+            self.session.info = {}
+
+        if "uow_events" not in self.session.info:
+            self.session.info["uow_events"] = []
+
+        self._pending_events: list[tuple[str, Any]] = self.session.info["uow_events"]
 
     def register_event(self, event_name: str, payload: Any) -> None:
         """Queue a domain event for post-commit dispatch.
+
+        Events registered across nested unit-of-work scopes are buffered into the
+        session store and dispatched collectively upon the successful root commit.
 
         Args:
             event_name: The name/identifier of the event to queue.
@@ -50,15 +61,20 @@ class UnitOfWork:
         self._pending_events.append((event_name, payload))
 
     async def commit(self) -> None:
-        """Commit the database session and dispatch all pending events.
+        """Commit the database session and dispatch all accumulated domain events.
 
-        This method attempts to commit the database session. If the commit succeeds,
-        buffered domain events are popped and dispatched. If the commit fails, the
-        session is rolled back and the original database exception is raised.
+        In nested transaction scopes, this method flushes pending operations to
+        the database without committing the physical transaction until the outermost
+        scope concludes.
 
         Raises:
-            Exception: Any exception encountered during the transactional database commit.
+            Exception: Any exception encountered during transactional commit.
         """
+        current_depth = self.session.info.get("uow_depth", 0)
+        if current_depth > 1:
+            await self.session.flush()
+            return
+
         try:
             await self.session.commit()
         except Exception as e:
@@ -66,7 +82,6 @@ class UnitOfWork:
             await self.session.rollback()
             raise
 
-        # Dispatch events safely after a guaranteed commit
         while self._pending_events:
             event_name, payload = self._pending_events.pop(0)
             try:
@@ -78,35 +93,44 @@ class UnitOfWork:
                 )
 
     async def rollback(self) -> None:
-        """Roll back the database session and clear all pending domain events."""
-        await self.session.rollback()
+        """Roll back the database session, clear event buffers, and reset transaction depth."""
+        self.session.info["uow_depth"] = 0
+        self.session.info["uow_managed"] = False
         self._pending_events.clear()
+        await self.session.rollback()
 
     async def __aenter__(self) -> "UnitOfWork":
         """Enter the asynchronous context manager block.
 
-        Configures the session metadata to signify it is now managed within a
-        Unit of Work lifecycle boundary.
+        Increments the active nesting depth on the session and registers the unit-of-work
+        lifecycle boundary.
 
         Returns:
             The active UnitOfWork instance.
         """
+        current_depth = self.session.info.get("uow_depth", 0)
+        self.session.info["uow_depth"] = current_depth + 1
         self.session.info["uow_managed"] = True
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Exit the asynchronous context manager block.
 
-        Automatically performs a rollback if an unhandled exception is encountered,
-        or commits the transaction otherwise.
+        Safely manages transaction completion by rolling back if an error occurred,
+        or committing only when exiting the outermost root transaction boundary.
 
         Args:
             exc_type: The type of exception raised inside the block, if any.
             exc_val: The exception instance raised, if any.
             exc_tb: The traceback associated with the exception, if any.
         """
-        self.session.info["uow_managed"] = False
-        if exc_type:
+        current_depth = max(0, self.session.info.get("uow_depth", 1) - 1)
+        self.session.info["uow_depth"] = current_depth
+
+        if exc_type is not None:
+            self.session.info["uow_managed"] = False
+            self.session.info["uow_depth"] = 0
             await self.rollback()
-        else:
+        elif current_depth == 0:
+            self.session.info["uow_managed"] = False
             await self.commit()

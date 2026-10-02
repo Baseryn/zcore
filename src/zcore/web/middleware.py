@@ -18,7 +18,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from zcore.config import settings
 from zcore.context.context import ctx
 from zcore.db.setup import db_manager
-from zcore.kernel.di import _current_scope_id, container
+from zcore.kernel.di import _current_scope_id, _scoped_instances, container
 
 log = structlog.get_logger()
 REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-\.\_\:]{8,64}$")
@@ -171,12 +171,16 @@ class ScopedDependencyMiddleware:
             return
 
         scope_id = str(uuid.uuid4())
-        token = _current_scope_id.set(scope_id)
+        scope_token = _current_scope_id.set(scope_id)
+        instances_token = _scoped_instances.set({})
 
         try:
-            async with db_manager.session() as session:
-                container.register_scoped_instance(AsyncSession, session)
+            if getattr(db_manager, "_session_factory", None) is not None:
+                async with db_manager.session() as session:
+                    container.register_scoped_instance(AsyncSession, session)
+                    await self.app(scope, receive, send)
+            else:
                 await self.app(scope, receive, send)
         finally:
-            container.clear_scope(scope_id)
-            _current_scope_id.reset(token)
+            _scoped_instances.reset(instances_token)
+            _current_scope_id.reset(scope_token)

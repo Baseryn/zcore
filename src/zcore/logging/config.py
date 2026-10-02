@@ -3,7 +3,7 @@
 This module initializes the application's logging pipeline. It integrates standard
 Python `logging` with `structlog` via ProcessorFormatter to provide a multi-tier,
 enterprise-ready logging subsystem supporting custom handlers, file rotation, and full dictConfig overrides,
-while preserving native Uvicorn console formatting during development workflows.
+while preserving native console formatting for configured passthrough loggers during development workflows.
 """
 
 import logging
@@ -26,8 +26,8 @@ def setup_logging(
     """Configure the global structlog and standard logging engine.
 
     Supports zero-code declarative settings from `.env`, code-level handler and processor injections,
-    and complete `logging.config.dictConfig` overrides. Preserves native Uvicorn terminal formatting
-    in development mode unless JSON structured formatting is explicitly requested.
+    and complete `logging.config.dictConfig` overrides. Preserves native terminal formatting
+    for passthrough loggers in development mode unless JSON structured formatting is explicitly requested.
 
     Args:
         config: An optional `LoggingSettings` instance or dictionary configuration. Defaults to None.
@@ -144,9 +144,19 @@ def setup_logging(
     root_logger.setLevel(level)
 
     for logger_name in cfg.muted_loggers:
-        muted_logger = logging.getLogger(logger_name)
-        muted_logger.handlers.clear()
-        muted_logger.propagate = True
+        target_logger = logging.getLogger(logger_name)
+        target_logger.handlers.clear()
+        target_logger.propagate = False
+
+    if is_json:
+        for logger_name in cfg.intercept_loggers:
+            target_logger = logging.getLogger(logger_name)
+            target_logger.handlers.clear()
+            target_logger.propagate = True
+    else:
+        for logger_name in cfg.passthrough_loggers:
+            target_logger = logging.getLogger(logger_name)
+            target_logger.propagate = False
 
     structlog.configure(
         processors=[

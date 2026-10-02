@@ -2,7 +2,8 @@
 
 This module provides pagination strategies for relational query outputs. It supports
 both Page-Number (Offset-based) pagination and high-performance Cursor (Keyset-based)
-pagination with base64 encoded metadata, integrating with dynamic configuration boundaries.
+pagination with base64 encoded metadata, integrating with dynamic configuration boundaries
+and inspecting declarative model primary keys dynamically.
 """
 
 import base64
@@ -212,31 +213,33 @@ class PageNumberPagination(BasePagination[T]):
 
 
 class CursorPagination(BasePagination[T]):
-    """Keyset-based cursor pagination strategy."""
+    """Keyset-based cursor pagination strategy with dynamic primary key inspection."""
 
     params_class = CursorParams
 
-    def __init__(self, cursor_field: str = "id", order: str = "desc"):
+    def __init__(self, cursor_field: str | None = None, order: str = "desc"):
         """Initialize the CursorPagination engine.
 
         Args:
             cursor_field: The model field key used to coordinate position boundaries.
-                Defaults to "id".
+                If None, dynamically defaults to the model's inspected primary key.
             order: The sorting order ('asc' or 'desc'). Defaults to "desc".
         """
         self.cursor_field = cursor_field
         self.order = order.lower()
 
-    def _encode_cursor(self, last_item: Any) -> str:
+    def _encode_cursor(self, last_item: Any, cursor_field: str, pk_name: str) -> str:
         """Serialize and encode an entity's coordinate parameters to base64.
 
         Args:
             last_item: The boundary database model record to serialize.
+            cursor_field: The resolved coordinate field name.
+            pk_name: The inspected primary key column identifier of the entity.
 
         Returns:
             A base64 encoded URL-safe string representation of the cursor coordinate payload.
         """
-        value = getattr(last_item, self.cursor_field, None)
+        value = getattr(last_item, cursor_field, None)
         if isinstance(value, datetime):
             value = (
                 value.replace(tzinfo=UTC)
@@ -245,7 +248,7 @@ class CursorPagination(BasePagination[T]):
             )
             value = value.isoformat()
 
-        payload = {"value": value, "id": str(getattr(last_item, "id", ""))}
+        payload = {"value": value, "pk": str(getattr(last_item, pk_name, ""))}
 
         json_str = json_dumps(payload)
         encoded = base64.urlsafe_b64encode(json_str.encode()).decode()
@@ -258,7 +261,7 @@ class CursorPagination(BasePagination[T]):
             cursor_str: The base64 URL-safe cursor string value.
 
         Returns:
-            A dictionary containing parsed "value" and "id" fields, or None if empty.
+            A dictionary containing parsed "value" and "pk" fields, or None if empty.
 
         Raises:
             ValidationError: If the cursor payload is malformed or invalid.
@@ -270,12 +273,15 @@ class CursorPagination(BasePagination[T]):
             cursor_str += "=" * padding_needed
             decoded = base64.urlsafe_b64decode(cursor_str.encode()).decode()
             decoded_dict = json_loads(decoded)
-            if (
-                not isinstance(decoded_dict, dict)
-                or "value" not in decoded_dict
-                or "id" not in decoded_dict
-            ):
+            if not isinstance(decoded_dict, dict) or "value" not in decoded_dict:
                 raise ValidationError(message="Malformed cursor parameter provided.")
+
+            if "pk" not in decoded_dict and "id" in decoded_dict:
+                decoded_dict["pk"] = decoded_dict["id"]
+
+            if "pk" not in decoded_dict:
+                raise ValidationError(message="Malformed cursor parameter provided.")
+
             return decoded_dict
         except ValidationError:
             raise
@@ -305,48 +311,58 @@ class CursorPagination(BasePagination[T]):
         size = params.size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
         cursor_data = self._decode_cursor(params.cursor) if params.cursor else None
 
-        valid_columns = {col.key for col in inspect(model).columns}
-        if self.cursor_field not in valid_columns:
+        mapper = inspect(model)
+        pk_col = mapper.primary_key[0]
+        pk_name = pk_col.name
+        effective_cursor_field = self.cursor_field or pk_name
+
+        valid_columns = {col.key for col in mapper.columns}
+        if effective_cursor_field not in valid_columns:
             raise ValidationError(
-                message=f"Invalid cursor field: '{self.cursor_field}' on {model.__name__}"
+                message=f"Invalid cursor field: '{effective_cursor_field}' on {model.__name__}"
             )
 
-        col = getattr(model, self.cursor_field)
-        pk_col = model.id
+        col = getattr(model, effective_cursor_field)
 
         if cursor_data:
             val = cursor_data["value"]
-            last_id = cursor_data["id"]
+            last_pk = cursor_data["pk"]
 
             try:
                 pk_type = getattr(pk_col.type, "python_type", None)
             except (NotImplementedError, AttributeError):
                 pk_type = None
 
-            if pk_type is int and isinstance(last_id, str):
+            if pk_type is int and isinstance(last_pk, str):
                 with contextlib.suppress(ValueError):
-                    last_id = int(last_id)
-            elif pk_type is uuid.UUID and isinstance(last_id, str):
+                    last_pk = int(last_pk)
+            elif pk_type is uuid.UUID and isinstance(last_pk, str):
                 with contextlib.suppress(ValueError):
-                    last_id = uuid.UUID(last_id)
+                    last_pk = uuid.UUID(last_pk)
 
             if isinstance(col.type, DateTime) and isinstance(val, str):
                 with contextlib.suppress(ValueError):
                     val = datetime.fromisoformat(val)
 
-            if self.order == "desc":
-                query = query.where(
-                    or_(col < val, and_(col == val, pk_col < last_id))
-                )
+            if effective_cursor_field == pk_name:
+                query = query.where(col < val if self.order == "desc" else col > val)
             else:
-                query = query.where(
-                    or_(col > val, and_(col == val, pk_col > last_id))
-                )
+                if self.order == "desc":
+                    query = query.where(
+                        or_(col < val, and_(col == val, pk_col < last_pk))
+                    )
+                else:
+                    query = query.where(
+                        or_(col > val, and_(col == val, pk_col > last_pk))
+                    )
 
-        if self.order == "desc":
-            query = query.order_by(col.desc(), pk_col.desc())
+        if effective_cursor_field == pk_name:
+            query = query.order_by(col.desc() if self.order == "desc" else col.asc())
         else:
-            query = query.order_by(col.asc(), pk_col.asc())
+            if self.order == "desc":
+                query = query.order_by(col.desc(), pk_col.desc())
+            else:
+                query = query.order_by(col.asc(), pk_col.asc())
 
         paginated_query = query.limit(size + 1)
         items_result = await session.execute(paginated_query)
@@ -357,7 +373,7 @@ class CursorPagination(BasePagination[T]):
 
         if has_more:
             items = items[:size]
-            next_cursor = self._encode_cursor(items[-1])
+            next_cursor = self._encode_cursor(items[-1], effective_cursor_field, pk_name)
 
         meta = {"next_cursor": next_cursor, "has_more": has_more, "size": size}
         return PaginatedResult(data=items, meta=meta)
