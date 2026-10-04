@@ -93,11 +93,9 @@ class BaseAuth(Generic[T]):
             identity = payload.get(self.identity_claim)
             if not identity or payload.get("type") != self.token_type:
                 raise AuthError(message="Invalid token structure or type.")
-        except Exception as e:
+        except Exception:
             if not self.auto_error:
                 return None
-            if isinstance(e, AuthError):
-                raise
             raise AuthError(message="Invalid token or token has expired.")
 
         cache_key = f"user:{identity}"

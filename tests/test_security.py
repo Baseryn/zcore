@@ -11,6 +11,7 @@ from zcore.config import settings
 from zcore.context import ctx
 from zcore.exceptions import AuthError, ForbiddenError
 from zcore.security import BaseAuth, HasScopes, Security
+from zcore.security.dependencies import get_optional_user_stub
 
 
 class MockUser:
@@ -317,3 +318,51 @@ def test_base_auth_dynamic_cache_ttl() -> None:
         auth_instance = MyAuth(user_schema=SampleUserModel)
         assert auth_instance.cache_ttl == 600
         assert auth_instance.cache.default_ttl == 600
+
+
+@pytest.mark.anyio
+async def test_base_auth_optional_missing_token() -> None:
+    auth_instance = MyAuth(user_schema=SampleUserModel, auto_error=False)
+    mock_request = MagicMock()
+    user_data = await auth_instance(mock_request, token=None)
+    assert user_data is None
+
+
+@pytest.mark.anyio
+async def test_base_auth_optional_invalid_token() -> None:
+    auth_instance = MyAuth(user_schema=SampleUserModel, auto_error=False)
+    mock_request = MagicMock()
+    user_data = await auth_instance(mock_request, token="invalid_jwt_token")
+    assert user_data is None
+
+
+@pytest.mark.anyio
+async def test_base_auth_optional_valid_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    token = Security.create_jwt({"sub": "active_user", "type": "access"})
+    auth_instance = MyAuth(user_schema=SampleUserModel, auto_error=False)
+
+    mock_cache = AsyncMock()
+    mock_cache.get.return_value = None
+    monkeypatch.setattr(auth_instance, "cache", mock_cache)
+
+    mock_request = MagicMock()
+    user_data = await auth_instance(mock_request, token=token)
+
+    assert user_data is not None
+    assert user_data.is_active is True
+    assert ctx.user_id == user_data.id
+
+
+@pytest.mark.anyio
+async def test_base_auth_required_missing_token() -> None:
+    auth_instance = MyAuth(user_schema=SampleUserModel, auto_error=True)
+    mock_request = MagicMock()
+    with pytest.raises(AuthError) as exc_info:
+        await auth_instance(mock_request, token=None)
+    assert "Authentication required" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_get_optional_user_stub_default() -> None:
+    result = await get_optional_user_stub()
+    assert result is None
