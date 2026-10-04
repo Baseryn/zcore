@@ -25,17 +25,24 @@ class Zchema(BaseModel):
     """
 
     __model__: ClassVar[str | None] = None
+    __private__: ClassVar[set[str] | list[str] | None] = None
 
     @classmethod
     def _get_relative_restricted_paths(cls) -> set[str]:
         """Extract and normalize restricted field paths mapped to this schema's domain."""
+        relative_paths = set()
+
+        if not ctx.user_id:
+            private_fields = getattr(cls, "__private__", None)
+            if private_fields:
+                relative_paths.update(private_fields)
+
         model_name = getattr(cls, "__model__", None)
         if not model_name:
-            return set()
+            return relative_paths
 
         action = ctx.get("action")
         restricted = ctx.restricted_fields
-        relative_paths = set()
 
         action_prefix = f"{model_name}.{action}." if action else None
         global_prefix = f"{model_name}."
