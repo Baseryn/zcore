@@ -47,6 +47,10 @@ if TYPE_CHECKING:
     from zcore.kernel.events import EventDispatcher, on_event
     from zcore.kernel.plugins import Plugin
     from zcore.security.auth import BaseAuth
+    from zcore.security.dependencies import (
+        get_current_user_stub,
+        get_optional_user_stub,
+    )
     from zcore.security.permissions import BasePermission, HasScopes
     from zcore.security.protocols import UserProtocol
     from zcore.security.security import Security
@@ -118,7 +122,9 @@ __all__ = [
     "dispatch_db_event",
     "format_iso_with_app_timezone",
     "get_app_timezone",
+    "get_current_user_stub",
     "get_db",
+    "get_optional_user_stub",
     "get_settings",
     "get_storage_provider",
     "http_exception_handler",
@@ -265,6 +271,14 @@ def __getattr__(name: str) -> Any:
         from zcore.security.auth import BaseAuth
 
         return BaseAuth
+    if name == "get_current_user_stub":
+        from zcore.security.dependencies import get_current_user_stub
+
+        return get_current_user_stub
+    if name == "get_optional_user_stub":
+        from zcore.security.dependencies import get_optional_user_stub
+
+        return get_optional_user_stub
     if name == "BasePermission":
         from zcore.security.permissions import BasePermission
 
@@ -398,6 +412,7 @@ def __getattr__(name: str) -> Any:
         "unhandled_exception_handler",
     ):
         import zcore.exceptions.handlers as handlers_module
+
         return getattr(handlers_module, name)
-    
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

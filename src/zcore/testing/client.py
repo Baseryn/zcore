@@ -21,7 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from zcore.config import settings
 from zcore.context.context import ctx
 from zcore.db.setup import Base, db_manager
-from zcore.security.dependencies import get_current_user_stub
+from zcore.security.dependencies import (
+    get_current_user_stub,
+    get_optional_user_stub,
+)
 from zcore.testing.fixtures import (
     AppLifespan,
     ContainerSandbox,
@@ -182,7 +185,7 @@ class ZTestClient:
 
                 return GenericMockUser(extra_user_attrs or {})
 
-            auth_stubs: list[Any] = [get_current_user_stub]
+            auth_stubs: list[Any] = [get_current_user_stub, get_optional_user_stub]
             if user_dependency is not None:
                 if isinstance(user_dependency, (list, tuple, set)):
                     auth_stubs.extend(user_dependency)
