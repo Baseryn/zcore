@@ -17,7 +17,7 @@ from zcore.exceptions import AuthError
 from zcore.security.security import Security
 
 T = TypeVar("T", bound=BaseModel)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 
 class BaseAuth(Generic[T]):
@@ -34,6 +34,7 @@ class BaseAuth(Generic[T]):
         token_type: str = "access",
         cache_prefix: str = "auth",
         cache_ttl: int | None = None,
+        auto_error: bool = True,
     ) -> None:
         """Initialize the BaseAuth instance.
 
@@ -43,10 +44,12 @@ class BaseAuth(Generic[T]):
             token_type: Target validated string within claims. Defaults to "access".
             cache_prefix: Cache prefix namespace. Defaults to "auth".
             cache_ttl: Expiration lifespan of cache items in seconds. If None, resolves from `Settings.AUTH_CACHE_TTL`. Defaults to None.
+            auto_error: Whether to raise authentication errors on missing or invalid tokens. Defaults to True.
         """
         self.user_schema = user_schema
         self.identity_claim = identity_claim
         self.token_type = token_type
+        self.auto_error = auto_error
         self.cache_ttl = cache_ttl if cache_ttl is not None else getattr(
             settings, "AUTH_CACHE_TTL", 300
         )
@@ -66,26 +69,35 @@ class BaseAuth(Generic[T]):
         raise NotImplementedError
 
     async def __call__(
-        self, request: Request, token: str = Depends(oauth2_scheme)
-    ) -> T:
+        self, request: Request, token: str | None = Depends(oauth2_scheme)
+    ) -> T | None:
         """Execute core request interception authentication workflow.
 
         Args:
             request: The incoming FastAPI request instance.
-            token: The extracted string token from authorization headers.
+            token: The extracted string token from authorization headers, or None.
 
         Returns:
-            The parsed Pydantic schema model representing the user.
+            The parsed Pydantic schema model representing the user, or None if unauthenticated and auto_error is False.
 
         Raises:
             AuthError: If signature evaluation, user status validation, or type checks fail.
         """
+        if not token:
+            if self.auto_error:
+                raise AuthError(message="Authentication required.")
+            return None
+
         try:
             payload = Security.decode_jwt(token)
             identity = payload.get(self.identity_claim)
             if not identity or payload.get("type") != self.token_type:
                 raise AuthError(message="Invalid token structure or type.")
-        except Exception:
+        except Exception as e:
+            if not self.auto_error:
+                return None
+            if isinstance(e, AuthError):
+                raise
             raise AuthError(message="Invalid token or token has expired.")
 
         cache_key = f"user:{identity}"
@@ -94,6 +106,8 @@ class BaseAuth(Generic[T]):
         if not user_data:
             db_user = await self.fetch_user(identity)
             if not db_user or not getattr(db_user, "is_active", True):
+                if not self.auto_error:
+                    return None
                 raise AuthError(message="User inactive or not found.")
 
             user_data = self.user_schema.model_validate(db_user)
@@ -102,6 +116,8 @@ class BaseAuth(Generic[T]):
             )
 
         if not getattr(user_data, "is_active", True):
+            if not self.auto_error:
+                return None
             raise AuthError(message="User inactive")
 
         for field_name in type(user_data).model_fields:
