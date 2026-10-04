@@ -112,9 +112,9 @@ def test_cli_startapp_scaffolding(
         assert (app_dir / file).is_file()
 
     if with_test:
-        assert (app_dir / "tests.py").is_file()
+        assert (app_dir / f"test_{app_name}.py").is_file()
     else:
-        assert not (app_dir / "tests.py").exists()
+        assert not (app_dir / f"test_{app_name}.py").exists()
 
     plugin_content = (app_dir / "plugin.py").read_text(encoding="utf-8")
     models_content = (app_dir / "models.py").read_text(encoding="utf-8")
