@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from zcore import Base, container, ctx, db_manager, get_db, settings
 from zcore.context.context import _request_context_store
-from zcore.security import UserProtocol, get_current_user_stub
+from zcore.security import UserProtocol, get_current_user_stub, get_optional_user_stub
 from zcore.testing import (
     BaseZTest,
     ContainerSandbox,
@@ -62,6 +62,12 @@ async def get_me(user: UserProtocol = Depends(get_current_user_stub)):
         "scopes": getattr(user, "scopes", []),
         "phone": getattr(user, "phone_number", None)
     }
+
+@dummy_app.get("/optional-me")
+async def get_optional_me(user: UserProtocol | None = Depends(get_optional_user_stub)):
+    if user is None:
+        return {"authenticated": False, "id": None}
+    return {"authenticated": True, "id": str(user.id)}
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_test_engine():
@@ -305,3 +311,22 @@ async def test_dependency_override_custom_preservation():
         
     assert dummy_app.dependency_overrides.get(DevelopmentCustomDep)() == "developer_preset"
     del dummy_app.dependency_overrides[DevelopmentCustomDep]
+
+@pytest.mark.asyncio
+async def test_optional_user_mocking_authenticated():
+    uid = uuid.uuid4()
+    async with ZTestClient(dummy_app, user_id=uid, use_db=False) as client:
+        res = await client.get("/optional-me")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["authenticated"] is True
+        assert data["id"] == str(uid)
+
+@pytest.mark.asyncio
+async def test_optional_user_mocking_guest():
+    async with ZTestClient(dummy_app, use_db=False) as client:
+        res = await client.get("/optional-me")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["authenticated"] is False
+        assert data["id"] is None

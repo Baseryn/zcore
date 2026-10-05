@@ -14,7 +14,7 @@ from sqlalchemy import Column, Integer, Uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
-from zcore.context.context import ZContext
+from zcore.context.context import ZContext, ctx
 from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
@@ -74,6 +74,15 @@ class DummyOutWithNested(Zchema):
     id: str
     name: str
     profile: NestedProfile
+
+
+class PrivateFieldModel(Zchema):
+    __model__ = "secret_entity"
+    __private__: ClassVar[set[str]] = {"cost_price", "internal_notes"}
+    id: str
+    name: str
+    cost_price: float = 0.0
+    internal_notes: str | None = None
 
 
 class TargetService:
@@ -828,3 +837,44 @@ async def test_router_lookup_projection_relationship_eager_loading() -> None:
     assert load_fields is not None
     assert loader_options is not None
     assert len(loader_options) == 1
+
+
+def test_zchema_private_fields_pruned_for_guest() -> None:
+    ctx.user_id = None
+    data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+    instance = PrivateFieldModel.model_validate(data)
+    serialized = instance.model_dump(mode="json")
+    assert "cost_price" not in serialized
+    assert "internal_notes" not in serialized
+    assert serialized["name"] == "ItemA"
+
+
+def test_zchema_private_fields_visible_for_authenticated_user() -> None:
+    ctx.user_id = uuid.uuid4()
+    try:
+        data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+        instance = PrivateFieldModel.model_validate(data)
+        serialized = instance.model_dump(mode="json")
+        assert serialized["cost_price"] == 45.0
+        assert serialized["internal_notes"] == "Confidential"
+        assert serialized["name"] == "ItemA"
+    finally:
+        ctx.user_id = None
+
+
+def test_zchema_private_fields_json_schema_pruned_for_guest() -> None:
+    ctx.user_id = None
+    schema = PrivateFieldModel.model_json_schema()
+    properties = schema.get("properties", {})
+    assert "cost_price" not in properties
+    assert "internal_notes" not in properties
+    assert "name" in properties
+
+
+def test_zchema_private_fields_input_filtering_for_guest() -> None:
+    ctx.user_id = None
+    input_data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+    filtered = PrivateFieldModel.filter_restricted_inputs(dict(input_data))
+    assert "cost_price" not in filtered
+    assert "internal_notes" not in filtered
+    assert filtered["name"] == "ItemA"
