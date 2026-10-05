@@ -1,21 +1,21 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Baseryn/zcore-docs/master/public/banner.png" alt="ZCore Logo" width="620">
+  <img src="https://raw.githubusercontent.com/Baseryn/zcore-docs/master/public/banner.png" alt="FastAPI ZCore Framework Logo" width="620">
 </p>
 
 <p align="center">
-  <strong>A pragmatic and complementary architectural layer built on top of FastAPI.</strong><br>
-  <em>Standardize your structure, protect your data, and manage atomic transactions—without losing your development freedom.</em>
+  <strong>A composable architectural foundation for building scalable applications on top of FastAPI.</strong><br>
+  <em>Standardize your structure, manage atomic transactions, and protect sensitive data — without sacrificing FastAPI's flexibility.</em>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/fastapi-zcore-framework/">
-    <img src="https://img.shields.io/pypi/v/fastapi-zcore-framework?label=PyPI&color=teal" alt="PyPI">
+    <img src="https://img.shields.io/pypi/v/fastapi-zcore-framework?label=PyPI&color=teal" alt="PyPI Version">
   </a>
   <a href="https://github.com/Baseryn/zcore/blob/master/LICENSE">
-    <img src="https://img.shields.io/github/license/Baseryn/zcore?color=purple" alt="License">
+    <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
   </a>
   <a href="https://github.com/Baseryn/zcore/actions/workflows/test.yml">
-    <img src="https://github.com/Baseryn/zcore/actions/workflows/test.yml/badge.svg" alt="CI">
+    <img src="https://github.com/Baseryn/zcore/actions/workflows/test.yml/badge.svg" alt="Continuous Integration">
   </a>
   <a href="https://zcore.baseryn.com">
     <img src="https://img.shields.io/badge/docs-online-purple" alt="Documentation">
@@ -27,215 +27,248 @@
 
 ---
 
-## What is ZCore?
+## 🧭 Overview
 
-**ZCore is not a framework that hides FastAPI — it is the chassis that stabilizes it.**
+**FastAPI is an exceptional microframework for HTTP routing, request parsing, and asynchronous I/O.**
 
-While FastAPI provides a high-performance engine for HTTP, it leaves the architecture of medium-to-large applications entirely to the developer. ZCore fills that gap with:
+However, as applications grow into medium and large systems, teams inevitably encounter an architectural gap:
+* Database sessions leak across asynchronous tasks or background jobs.
+* Business workflows spanning multiple repositories lack reliable, all-or-nothing transaction boundaries.
+* Teams end up writing dozens of nearly identical DTO schemas just to hide internal fields (like profit margins, supplier terms, or sensitive IDs) from different user roles.
+* Domain modules become tightly coupled through circular imports and tangled dependency trees.
 
-- **🔐 Context-Aware Data Masking** — Write one schema; sensitive fields are automatically pruned per-user across validation, serialization, and OpenAPI specs.
-- **🛡️ Built-in Soft-Delete & Atomic Restore** — Model-level query scoping, batch restoration (`restore_multi`), and hard-delete bypasses (`?force=true`).
-- **🔗 Atomic Unit of Work** — Coordinate multi-repository operations into all-or-nothing transactions with deferred event dispatching.
-- **⚡ Scoped Dependency Injection** — High-performance constructor auto-wiring for Singleton, Transient, and request-scoped dependencies.
-- **🚨 Unified Error Normalization** — Standardized JSON error envelopes across domain errors, 422 validations, and 500 runtime exceptions with debug-gated diagnostics.
-- **🏗️ Modular Plugin Architecture** — Organize business domains into decoupled plugins with topological dependency ordering.
-- **🔍 Secure Dynamic Search Engine** — Nested JSON filters, inverted operators, logical `not` groups, field projection, eager loading, and column-level access controls.
-- **📦 Interactive TUI & Scaffolding Engine** — Context-aware terminal dashboard, cascading server runners with transparent Uvicorn forwarding, and granular layer-by-layer domain generators.
+Heavy enterprise frameworks solve these challenges by enforcing rigid conventions, proprietary ORMs, and heavy abstractions that eliminate your freedom.
 
----
+**ZCore is the middle ground:**
+ZCore provides a structured, modular layer that sits directly on top of standard FastAPI, SQLAlchemy 2.0, and Pydantic V2. It introduces proven architectural patterns (Unit of Work, IoC Dependency Injection, Field-Level Security, and Domain Event Dispatching) as **composable building blocks**. 
 
-## Why ZCore?
-
-| Concern | Raw FastAPI | With ZCore |
-|---------|-------------|------------|
-| **Endpoint Scaffolding** | Manually write 8+ routes and handlers per model | One `BaseRouter` class → 8 secure endpoints (CRUD + Search + Lookup) out-of-the-box |
-| **Data Leakage** | Multiple Pydantic models per role; manual conditionals | `Zchema` auto-prunes restricted fields per active context |
-| **Database Transactions** | Scattered `commit()` / `rollback()` calls | `UnitOfWork` guarantees atomicity + post-commit domain events |
-| **Soft Delete & Recovery** | Manual `WHERE deleted_at IS NULL` per query | `SoftDeleteMixin` + automatic query scoping + atomic `restore()` / `restore_multi()` |
-| **Dependency Wiring** | Deeply nested, verbose `Depends()` parameter chains | Clean constructor auto-wiring via IoC container + `Inject[T]` |
-| **Error Handling** | Fragmented exception formats across handlers | Unified `ResponseWrapper` normalization with debug-gated protection |
-| **Search & Pagination** | Hand-crafted SQL parsing per endpoint | Declarative JSON filters (including `not_*` operators) + keyset cursor and offset pagination |
-| **Project Tooling & Layout** | Manual folder creation, fragmented glue scripts | `zc` interactive TUI with auto `uv` setup & cascading server runner |
-| **Startup Orchestration** | Fragile `@app.on_event` chains | `Plugin` protocol with dependency DAG → topological sorting |
+> **Your code remains 100% standard FastAPI.** Adopt ZCore piece by piece where it solves real problems, or use the full architectural stack — with zero vendor lock-in.
 
 ---
 
-## ⚡ Quick Start
+## 🛍️ Reference Showcase: ZShop
 
-### 1. Install
+To see ZCore's architectural concepts in action before writing a single line of code, explore **[ZShop](https://github.com/Baseryn/zshop)** — the official Modular Monolith e-commerce reference implementation:
+
+* **Interactive Live Inspector Dock:** Monitor active request context, correlation IDs (`x-request-id`), execution latencies, and real-time SSE stream events.
+* **1-Click RBAC Persona Switcher:** Switch between SuperAdmin, Store Manager, Customer, and Guest to watch confidential data fields automatically vanish from responses via `Zchema`.
+* **Atomic Rollback Demonstration:** An interactive deficit checkout button verifying that stock adjustments and order persistence roll back atomically when any invariant fails.
+* **Decoupled Architecture:** Strict inter-module communication using Python Protocols (`ProductContract`) without cross-domain database coupling.
+
+👉 **[Explore the ZShop Showcase Repository](https://github.com/Baseryn/zshop)**
+
+---
+
+## ⚖️ Why ZCore? (An Honest Comparison)
+
+| Architectural Concern | Plain FastAPI | Full-Stack Monoliths (e.g. Django) | With ZCore on FastAPI |
+| :--- | :--- | :--- | :--- |
+| **Application Philosophy** | Minimalist microframework; no opinion on database, folders, or architecture. | Opinionated, batteries-included; tightly coupled to its own ORM and template engine. | **Composable layer;** provides enterprise architecture patterns while keeping FastAPI completely standard. |
+| **Role-Based Data Exposure** | Writing multiple Pydantic models per role (`UserPublic`, `UserAdmin`) or manual `if/else` checks. | Model-level permissions or custom serializer logic. | **Single-schema context shielding (`Zchema`);** forbidden fields are pruned dynamically from validation, serialization, and OpenAPI. |
+| **Multi-Repository Operations** | Scattered `session.commit()` calls; high risk of partial writes on failure. | Managed transaction blocks (`transaction.atomic()`). | **Re-entrant `UnitOfWork`;** coordinated all-or-nothing boundaries with domain events deferred until physical commit succeeds. |
+| **Background Processing** | Passing request sessions to background tasks often leads to `Session is closed` errors. | Requires external queue workers (Celery, RQ) even for simple background jobs. | **Dedicated `@background_task`;** automatically isolates DB sessions and IoC lifecycles from completed HTTP requests. |
+| **Domain Modularity** | Standard APIRouters; easily slips into spaghetti code and circular imports at scale. | Django Apps with rigid settings and global app registries. | **DAG-driven `Plugin` system;** topological startup sorting and pure Python Protocol contracts for zero-coupling. |
+| **Dataset Pagination** | Manual `offset / limit` SQL slicing that degrades on large tables. | Built-in offset paginators. | **Keyset Cursor Pagination (Base64);** zero-drift pagination and dynamic AST-like JSON search engine. |
+| **Testing Isolation** | Manual DB cleanup routines or slow schema recreation per test file. | TransactionTestCase rolling back transactions per test. | **Zero-side-effect `ZTestClient`;** automated savepoint rollbacks, context mocking, and container sandboxing. |
+
+---
+
+## 🚀 Quick Start (in Under 60 Seconds)
+
+### 1. Installation
 
 ```bash
-pip install fastapi-zcore-framework[all]
+pip install "fastapi-zcore-framework[all]"
 ```
 
-### 2. Scaffold
+### 2. Scaffold a New Project
 
-Launch the interactive wizard or run directly:
+The interactive `zc` CLI configures your environment, sets up a virtual environment (`uv` or `pip`), and provisions your database driver:
 
 ```bash
-# Interactive mode (prompts for DB driver, uv/.venv installation, etc.)
-zc init my_app && cd my_app
+# Interactive mode (recommended)
+zc init core_api && cd core_api
+
+# Generate your first domain module
 zc startapp tasks
-
-# Or instant non-interactive scaffolding with defaults
-zc init my_app -y && cd my_app
-zc startapp tasks -y
 ```
 
-### 3. Define
+### 3. Define Your Domain Model
 
-Open `tasks/models.py`:
+Open `tasks/models.py` (standard SQLAlchemy 2.0):
 
 ```python
 import uuid
-from zcore import Base
 from sqlalchemy.orm import Mapped, mapped_column
+from zcore import Base, SoftDeleteMixin
 
-class Task(Base):
+class Task(Base, SoftDeleteMixin):
     __tablename__ = "tasks"
     
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    title: Mapped[str]
+    title: Mapped[str] = mapped_column(index=True)
     is_completed: Mapped[bool] = mapped_column(default=False)
 ```
 
-### 4. Run
+### 4. Run the Development Server
 
 ```bash
 zc run
 ```
 
-Your API is live at **`http://127.0.0.1:8000`** with 8 secure endpoints (CRUD + Dynamic Search + Field-Projected Lookups) ready.
-
-> 📖 **Full walkthrough:** [Quick Start Guide](https://zcore.baseryn.com/docs/quick-start)
+Your API is running at `http://127.0.0.1:8000` with **8 production-ready endpoints** out of the box:
+* `POST /tasks/` — Create entity
+* `GET /tasks/{id}` — Fetch single record (with automatic PK type inspection)
+* `GET /tasks/` — List records (with cursor or offset pagination)
+* `POST /tasks/search` — Dynamic nested JSON filtering engine
+* `POST /tasks/lookup` — Lightweight field-projected endpoint for dropdowns
+* `PUT /tasks/{id}` & `PATCH /tasks/{id}` — Full and partial updates
+* `DELETE /tasks/{id}` — Soft delete (or permanent purge via `?force=true`)
+* `GET /tasks/?schema=true` — Dynamic role-aware frontend form schema
 
 ---
 
-## 🏛️ Core Pillars
+## 🏛️ Core Architectural Patterns
 
 <details>
-<summary><strong>🔐 Context Shielding (Zchema)</strong></summary>
-<br>
+<summary><strong>1. Context Shielding & Role-Based Field Pruning (<code>Zchema</code>)</strong></summary>
 
-Write a single schema. ZCore dynamically prunes input fields (preventing mass assignment) and output fields (preventing data leakage) based on the active user's permission scopes.
+### The Problem
+In enterprise applications, different roles require different views of the same data. A Customer must not see wholesale cost prices or internal supplier notes, while a Store Manager requires full financial transparency. Maintaining separate DTOs (`ProductPublic`, `ProductManager`, `ProductCreate`, `ProductAdminUpdate`) creates boilerplate and maintenance overhead.
+
+### The ZCore Solution
+Define your model once inheriting from `Zchema`. When a user's security context marks a field as restricted, ZCore automatically prunes it across **input parsing** (preventing mass assignment), **response serialization** (preventing data leakage), and **OpenAPI schema generation**:
 
 ```python
 import uuid
+from decimal import Decimal
+from pydantic import Field
 from zcore import Zchema
 
-class TaskResponse(Zchema):
-    __model__ = "tasks"
-    
+class ProductResponse(Zchema):
+    __model__ = "products"
+
     id: uuid.UUID
-    title: str
-    salary: float | None = None # Automatically pruned if unauthorized
+    name: str
+    price: Decimal
+    cost_price: Decimal | None = None      # 🔒 Sensitive business margin
+    supplier_notes: str | None = None  # 🔒 Internal agreement details
 ```
 
-When an authenticated user lacks view permissions for `tasks.salary`, the field vanishes from both JSON serialization and the OpenAPI schema — with zero manual `if` statements.
+* **When a Customer views the product:** `cost_price` and `supplier_notes` are completely omitted from the JSON output. ZCore automatically attaches a `Vary: Authorization, Cookie` header to protect downstream CDNs from cache poisoning.
+* **When a Manager views the product:** All fields are returned transparently.
 </details>
 
 <details>
-<summary><strong>🔗 Atomic Transactions (Unit of Work)</strong></summary>
-<br>
+<summary><strong>2. Atomic Unit of Work & Deferred Domain Events (<code>UnitOfWork</code>)</strong></summary>
 
-Group multiple repository operations into a single atomic unit. Events are buffered and dispatched **only after** a successful database commit. If any operation fails, the entire transaction rolls back and pending events are discarded.
+### The Problem
+In distributed or multi-repository architectures, business actions involve multiple persistence steps (e.g., deducting inventory, recording a purchase order, and generating an invoice). If step 2 fails, step 1 must be reverted. Furthermore, if you send an email or emit a domain event *before* the database commit succeeds, a subsequent failure leaves external systems out of sync.
+
+### The ZCore Solution
+ZCore implements a re-entrant, depth-aware `UnitOfWork`. Nested transactions safely flush changes to savepoints without prematurely committing, while domain events are buffered and dispatched **only after the root commit succeeds**:
 
 ```python
 from zcore import UnitOfWork
 
-async with UnitOfWork(session, dispatcher) as uow:
-    order = await order_repo.create(order_data)
-    await inventory_repo.decrement_stock(product_id, quantity)
+async with UnitOfWork(session=self.session, dispatcher=self.dispatcher) as uow:
+    # 1. Adjust inventory
+    await self.inventory_service.adjust_stock(product_id, -quantity)
     
-    # Queued safely: Dispatches ONLY after the DB commit succeeds!
-    uow.register_event("order.completed", {"order_id": str(order.id)})
+    # 2. Persist order
+    self.order_repo.add(new_order)
+    await self.session.flush()
+
+    # 3. Buffer domain event
+    # If the transaction rolls back, this event is discarded immediately!
+    uow.register_event("order.created", {"order_id": str(new_order.id)})
 ```
 </details>
 
 <details>
-<summary><strong>⚡ Scoped Dependency Injection</strong></summary>
-<br>
+<summary><strong>3. Contract-Driven Decoupling via Inversion of Control (<code>IoC Container</code>)</strong></summary>
 
-Inject services, repositories, and infrastructure dependencies via standard constructor type hints. ZCore's IoC container auto-wires them dynamically and purges request-scoped instances after each response.
+### The Problem
+Modular monoliths frequently suffer from circular imports when domain A (e.g., Orders) needs data from domain B (e.g., Catalog). Importing repositories or models across module boundaries creates tight database coupling.
+
+### The ZCore Solution
+Domains communicate strictly through pure Python `Protocols` (Contracts). The IoC Container auto-wires dependencies at runtime using constructor type hints with signature caching:
 
 ```python
-from zcore import BaseService
+# contracts/catalog.py (No database imports!)
+from typing import Protocol, runtime_checkable
 
-class TaskService(BaseService[Task]):
-    # Pure Python constructor: Auto-wired by ZCore's DI container
-    def __init__(self, repository: TaskRepo):
-        super().__init__(model=Task, repository=repository)
+@runtime_checkable
+class ProductContract(Protocol):
+    async def adjust_stock(self, product_id: str, delta: int) -> None: ...
 ```
-</details>
-
-<details>
-<summary><strong>🏗️ Modular Plugin System</strong></summary>
-<br>
-
-Each domain is an isolated `Plugin` conforming to a strict lifecycle contract. The Kernel resolves dependencies topologically using a Directed Acyclic Graph (DAG) to guarantee deterministic startup and shutdown sequences.
 
 ```python
-from fastapi import FastAPI
-from zcore import Plugin
-from .routers import router_instance
+# apps/orders/services.py
+from contracts.catalog import ProductContract
 
-class TasksPlugin(Plugin):
-    name = "tasks"
-    version = "0.1.0"
-    dependencies = ["auth"]  # Requires AuthPlugin to start first
-
-    def setup(self, app: FastAPI) -> None:
-        app.include_router(router_instance.router)
-
-    async def on_startup(self) -> None:
-        pass
+class OrderService(BaseService[Orders]):
+    # Pure Python constructor: Auto-wired by ZCore's IoC container!
+    def __init__(self, repository: OrderRepository, inventory: ProductContract):
+        super().__init__(model=Orders, repository=repository)
+        self.inventory = inventory
 ```
 </details>
 
 <details>
-<summary><strong>🔍 Secure Dynamic Search Engine & Lookups</strong></summary>
-<br>
+<summary><strong>4. Isolated Background Scopes (<code>@background_task</code>)</strong></summary>
 
-A dynamic query builder that translates nested JSON filters into safe SQLAlchemy 2.0 AST queries — featuring inverted operators (`not_like`, `not_in`, `not_between`), logical `not` grouping, relation eager-loading, keyset cursor pagination, and depth-limit protection against DoS attacks.
+### The Problem
+FastAPI's built-in `BackgroundTasks` executes callables after sending the HTTP response. If you pass an active request-scoped database session to a background task, the session is closed by the time the worker executes, causing `InterfaceError: Session is closed`.
 
-```json
-{
-  "filters": [
-    {
-      "op": "and",
-      "items": [
-        { "field": "is_completed", "op": "eq", "value": false },
-        { "field": "title", "op": "not_contains", "value": "draft" }
-      ]
-    },
-    {
-      "op": "not",
-      "items": [
-        { "field": "status", "op": "in", "value": ["archived", "cancelled"] }
-      ]
-    }
-  ],
-  "include": ["assignee"],
-  "sort": [
-    { "field": "created_at", "order": "desc" }
-  ],
-  "page": 1,
-  "size": 20
-}
+### The ZCore Solution
+The `@background_task` decorator creates an independent execution scope, provisions a dedicated database session, binds an isolated logging task ID, and auto-resolves annotated dependencies from the container:
+
+```python
+from zcore import background_task
+
+@background_task
+async def generate_invoice_task(
+    order_id: uuid.UUID,
+    order_repo: OrderRepository,  # Automatically injected with an isolated session!
+) -> None:
+    order = await order_repo.get(id=order_id)
+    # Safely executes without relying on completed HTTP request lifecycles
 ```
 </details>
 
 <details>
-<summary><strong>📦 Interactive TUI & Scaffolding Engine</strong></summary>
-<br>
+<summary><strong>5. Zero-Side-Effect Testing Engine (<code>ZTestClient</code>)</strong></summary>
 
-The `zc` CLI gives you a rich, interactive Terminal User Interface (TUI) powered by Questionary and Rich. It features:
+### The Problem
+Integration tests that write to a database require tedious teardown scripts or slow table recreation between test cases, leading to flaky test suites.
 
-* **Workspace & Context Awareness:** Detects whether you are inside an active project, in a root workspace containing multiple services, or starting fresh.
-* **Cascading Server Runner (`zc run`):** Hierarchical configuration precedence (`CLI Arguments > .env File > Defaults`) with transparent passthrough for arbitrary Uvicorn options.
-* **Automated `uv` / `.venv` Setup:** Initializes isolated virtual environments and installs dependencies automatically using `uv` (recommended) or standard `pip`.
-* **Multi-Engine Driver Bootstrapping:** Configures SQLite (`aiosqlite`), PostgreSQL (`asyncpg`), or MySQL (`aiomysql`) in `.env` and `requirements.txt` out-of-the-box.
-* **Granular Architectural Scaffolding:** Generates modular domain apps in 3 modes (*Full Boilerplate*, *Clean/Blank*, or *Custom Layer Selection* across Models, Schemas, Repositories, Services, Routers, Plugins, and Pytest suites).
+### The ZCore Solution
+`ZTestClient` executes tests inside **transactional savepoint rollbacks**. Changes are rolled back immediately upon test completion, keeping test runs fast and deterministic:
+
+```python
+import pytest
+from zcore.testing import ZTestClient
+from main import app
+
+@pytest.mark.asyncio
+async def test_order_placement_atomicity():
+    async with ZTestClient(
+        app,
+        user_id="customer-uuid",
+        scopes=["orders:create", "products:view"]
+    ) as client:
+        response = await client.post("/checkout/orders/", json={...})
+        assert response.status_code == 201
+    # Database is automatically rolled back to its exact pre-test state!
+```
+</details>
+
+---
+
+## 🛠️ Interactive Developer Tooling (`zc` CLI)
+
+ZCore includes an interactive terminal user interface (TUI) powered by Questionary and Rich:
 
 ```text
 $ zc
@@ -243,60 +276,62 @@ $ zc
 ⚡ ZCore Framework v0.1.0-rc.2 • Modern Modular Monolith
  FastAPI • SQLAlchemy 2.0 • Pydantic V2
 
-? What framework task would you like to perform? 📦 init — Scaffold a new full ZCore project
-┌  Initialize New ZCore Project
-│
-? Project directory name: core_api
-? Select primary database driver: PostgreSQL (asyncpg) — Production Ready
-? Initialize virtual environment (.venv) and install dependencies? Yes (uv)
-│  ✓ Environment & dependencies installed successfully.
-└  Project 'core_api' ready!
+? What framework task would you like to perform? 
+  ❯ 🧩 startapp   — Scaffold a modular domain app / plugin
+    ⚡ run        — Launch Uvicorn development server
+    📋 genenv     — Generate template .env from Settings class
+    🔑 gensecret  — Generate cryptographically secure SECRET_KEY
+    📦 init       — Scaffold a new ZCore project
+    🚪 exit       — Exit CLI
 ```
 
-#### CLI Command Reference
+### CLI Command Summary
 
-| Command | Interactive | Non-Interactive Flags | Purpose |
-|---------|:-----------:|-----------------------|---------|
-| `zc` | ✅ | — | Launch interactive orchestration dashboard |
-| `zc init [name]` | ✅ | `--db [sqlite\|postgres\|mysql]`, `-y` | Bootstrap a new project with settings, `.env`, and dependencies |
-| `zc startapp [name]` | ✅ | `--template / --no-template`, `--test / --no-test`, `-y` | Scaffold domain modules with granular layer selection |
-| `zc run [app]` | ✅ | `--host`, `--port`, `--reload / --no-reload`, `--workers`, `--log-level`, `--env-file` | Launch server with cascading configuration hierarchy & Uvicorn forwarding |
-| `zc gensecret` | — | — | Generate a 64-character cryptographically secure `SECRET_KEY` |
-| `zc genenv` | ✅ | `-o <output>`, `-f / --force` | Introspect active `Settings` classes and scaffold `.env.example` |
-</details>
-
----
-
-## 📖 Documentation
-
-| Resource | Description |
-|----------|-------------|
-| [🚀 Quick Start](https://zcore.baseryn.com/docs/quick-start) | Build a complete Task Manager API from scratch |
-| [📚 10-Step Quick Learn](https://zcore.baseryn.com/docs/quick-learn/step-1) | Deep dive into each architectural layer step-by-step |
-| [🔧 How-To Guides](https://zcore.baseryn.com/docs/how-to) | Pagination, search, file uploads, caching, and testing |
-| [🏛️ Core Concepts](https://zcore.baseryn.com/docs/core-concepts/context) | Deep dive into DI, Kernel, Security, UoW, and Zchema |
-| [📜 API Reference](https://zcore.baseryn.com/docs/api-reference/repository) | Complete class and method specifications |
-| [🕒 Changelog](https://zcore.baseryn.com/docs/changelog) | Release notes, breaking changes, and migrations |
+| Command | Key Flags | Purpose |
+| :--- | :--- | :--- |
+| `zc` | — | Open interactive terminal dashboard |
+| `zc init [name]` | `--db [sqlite\|postgres\|mysql]`, `-y` | Bootstrap project with `.env`, `.venv`, and driver dependencies |
+| `zc startapp [name]` | `--template / --no-template`, `--test`, `-y` | Generate domain module layers (models, schemas, repos, services, routers) |
+| `zc run [app]` | `--host`, `--port`, `--reload`, `--workers`, `--env-file` | Run server with cascading config hierarchy (`CLI > .env > Defaults`) |
+| `zc gensecret` | — | Generate a 64-character cryptographic `SECRET_KEY` |
+| `zc genenv` | `-o <output>`, `-f / --force` | Introspect active Pydantic `Settings` and scaffold `.env.example` |
 
 ---
 
-## 🤝 Contributing
+## 📢 Community Testing & Feedback (Release Candidate `rc.2`)
 
-Contributions are welcome! Please read our guidelines before submitting a PR.
+We are currently validating **`v0.1.0-rc.2`** before tagging the official `v1.0.0` stable release. 
 
-- **Issues:** Bug reports and feature requests via [GitHub Issues](https://github.com/Baseryn/zcore/issues)
-- **PRs:** Open a pull request with a clear description of the change
-- **Local Setup:** `pip install -e ".[all,dev]"` and run `hatch test` to verify
+We built ZCore to solve architectural pain points we faced in production. Before declaring the API stable, **we need your critical engineering feedback:**
+
+* **Try the Showcase:** Clone [ZShop](https://github.com/Baseryn/zshop), run the seed script, and test the endpoints.
+* **Test the Edge Cases:** Push the boundaries of `UnitOfWork`, test complex nested queries with `SearchEngine`, or inspect field pruning with `Zchema`.
+* **Break It & Report:** If an abstraction feels awkward, if a type hint breaks, or if an async session leaks, please open an issue!
+
+👉 **[Submit Issues & Architectural Feedback on GitHub](https://github.com/Baseryn/zcore/issues)**
+
+---
+
+## 📚 Documentation Index
+
+Comprehensive guides, architectural deep-dives, and complete API references are available at our official documentation portal:
+
+* **[Quick Start Tutorial](https://zcore.baseryn.com/docs/quick-start)** — From zero to a working API in 60 seconds.
+* **[10-Step Quick Learn](https://zcore.baseryn.com/docs/quick-learn/step-1)** — Systematic layer-by-layer walkthrough.
+* **[Architectural Comparisons](https://zcore.baseryn.com/docs/comparisons)** — Honest comparisons with plain FastAPI, Django, and other frameworks.
+* **[How-To Guides](https://zcore.baseryn.com/docs/how-to)** — Practical recipes for Multi-tenancy, Keyset Pagination, File Uploads, and Caching.
+* **[Core Concepts](https://zcore.baseryn.com/docs/core-concepts/context)** — Deep dives into DI auto-wiring, Unit of Work, Kernel DAG, and Context shielding.
+* **[API Reference](https://zcore.baseryn.com/docs/api-reference/repository)** — Detailed signatures and class specifications.
 
 ---
 
 ## 📄 License
 
-ZCore is licensed under the **Apache License 2.0**.  
-See [LICENSE](https://github.com/Baseryn/zcore/blob/master/LICENSE) for details.
+ZCore Framework is open-source software licensed under the **Apache License 2.0**.  
+See the [LICENSE](https://github.com/Baseryn/zcore/blob/master/LICENSE) file for details.
 
 ---
 
 <p align="center">
-  <sub>Built with ☕ and architectural rigor by <a href="https://github.com/alialfostovar">Ali Alf Ostovar</a> / <a href="https://github.com/Baseryn">Baseryn</a>.</sub>
+  <sub>Developed with architectural rigor and care by <a href="https://github.com/alialfostovar">Ali Alf Ostovar</a> / <a href="https://github.com/Baseryn">Baseryn</a>.</sub>
 </p>
