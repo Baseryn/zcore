@@ -22,8 +22,11 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Linting & Typing Tools
-        run: pip install ruff mypy hatch
+      - name: Install Dependencies & Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+          pip install -e ".[all]"
 
       - name: Ruff Linter
         run: ruff check src/zcore
