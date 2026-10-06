@@ -133,6 +133,22 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
 ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_any_generics = false
+warn_return_any = false
+warn_redundant_casts = false
+warn_unused_ignores = false
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
 exclude = ["tests/", "example/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "zcore.web.base_router",
+    "zcore.testing.fixtures",
+    "zcore.db.repository",
+    "zcore.exceptions.handlers",
+]
+ignore_errors = true

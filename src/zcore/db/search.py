@@ -636,5 +636,6 @@ class SearchEngine:
             A securely configured, size-bounded SQLAlchemy SELECT statement.
         """
         query = self.build_base_query(search_in)
-        offset = (search_in.page - 1) * search_in.size
-        return query.offset(offset).limit(search_in.size)
+        page_size = search_in.size or 20
+        offset = (search_in.page - 1) * page_size
+        return query.offset(offset).limit(page_size)

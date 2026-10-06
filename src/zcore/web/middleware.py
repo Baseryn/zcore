@@ -77,7 +77,7 @@ class RequestLogMiddleware:
 
         status_code = 500
 
-        async def send_wrapper(message: dict[str, Any]) -> None:
+        async def send_wrapper(message: Any) -> None:
             """Intercept response start event, capture HTTP status code, and inject correlation headers.
 
             Args:

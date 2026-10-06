@@ -4,7 +4,7 @@ This module provides the generic `BaseAuth` class to coordinate token decoding,
 caching logic, and dynamic context injection during FastAPI request cycles.
 """
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -53,7 +53,7 @@ class BaseAuth(Generic[T]):
         self.cache_ttl = (
             cache_ttl if cache_ttl is not None else getattr(settings, "AUTH_CACHE_TTL", 300)
         )
-        self.cache = BaseCache(prefix=cache_prefix, default_ttl=self.cache_ttl)
+        self.cache: BaseCache[Any] = BaseCache(prefix=cache_prefix, default_ttl=self.cache_ttl)
 
     async def fetch_user(self, identity: str) -> Any:
         """Fetch the active user model from persistent storage.
@@ -125,4 +125,4 @@ class BaseAuth(Generic[T]):
             else:
                 ctx.set(field_name, value)
 
-        return user_data
+        return cast(T | None, user_data)

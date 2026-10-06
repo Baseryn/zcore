@@ -145,7 +145,7 @@ class ZCoreAPIRoute(APIRoute):
                 # Dynamic generation dynamically invokes __get_pydantic_json_schema__ under active context
                 schema_dict = self.target_model.model_json_schema()
 
-                response_payload = ResponseWrapper(
+                response_payload: Any = ResponseWrapper(
                     success=True,
                     message="Schema generated successfully",
                     data=schema_dict,

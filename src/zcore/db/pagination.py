@@ -159,7 +159,8 @@ class PageNumberPagination(BasePagination[T]):
             ValidationError: If the requested `sort_by` field does not exist on the target model.
         """
         page = params.page
-        size = params.size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        raw_size = params.size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        size: int = int(raw_size) if raw_size is not None else 20
         offset = (page - 1) * size
 
         if params.sort_by:
@@ -302,7 +303,8 @@ class CursorPagination(BasePagination[T]):
             ValidationError: If the specified cursor_field is invalid or not located
                 on the target database model.
         """
-        size = params.size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        raw_size = params.size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        size: int = int(raw_size) if raw_size is not None else 20
         cursor_data = self._decode_cursor(params.cursor) if params.cursor else None
 
         mapper = inspect(model)

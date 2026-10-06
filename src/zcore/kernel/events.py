@@ -119,7 +119,7 @@ class EventDispatcher:
                     f"Error preparing event handler {handler.__name__} for event '{event_name}': {e}"
                 )
 
-        async_results = []
+        async_results: list[Any] = []
         if async_tasks:
             results = await asyncio.gather(*async_tasks, return_exceptions=True)
             for res in results:

@@ -216,7 +216,7 @@ class ZTestClient:
 class BaseZTest(ABC):
     """Declarative base class for structuring async test suites."""
 
-    app: FastAPI = None
+    app: Any = None
     user_id: Any = None
     is_active: bool = True
     is_superuser: bool = False

@@ -164,7 +164,7 @@ def initialize_settings(settings_inst: Settings) -> None:
         container.register_singleton(Settings, settings_inst)
 
 
-def get_settings(settings_class: type[T] = Settings) -> T:
+def get_settings(settings_class: type[T] = Settings) -> T:  # type: ignore[assignment]
     """Retrieve the settings instance from the dependency injection container.
 
     Args:

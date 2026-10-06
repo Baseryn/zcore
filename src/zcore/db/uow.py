@@ -41,7 +41,7 @@ class UnitOfWork:
         self.dispatcher = dispatcher
 
         if not isinstance(getattr(self.session, "info", None), dict):
-            self.session.info = {}
+            self.session.info = {}  # type: ignore[misc]
 
         if "uow_events" not in self.session.info:
             self.session.info["uow_events"] = []

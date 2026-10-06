@@ -15,6 +15,7 @@ from contextvars import ContextVar
 from typing import (
     Annotated,
     Any,
+    Generic,
     TypeVar,
     get_args,
     get_origin,
@@ -268,7 +269,7 @@ class Injector:
         return container.resolve(self.interface)
 
 
-class Inject:
+class Inject(Generic[T]):
     """Dynamic type marker supporting unified Annotated dependency injection.
 
     Allows type annotations in FastAPI routers, e.g., `service: Inject[UserService]`.

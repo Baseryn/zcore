@@ -38,7 +38,8 @@ def _ensure_eviction_task(interval: int | None = None) -> None:
         interval: Rest period duration in seconds between garbage collection sweeps.
     """
     global _eviction_task
-    effective_interval = interval or getattr(settings, "CACHE_EVICTION_INTERVAL", 60)
+    raw_interval = interval or getattr(settings, "CACHE_EVICTION_INTERVAL", 60)
+    effective_interval: int = int(raw_interval) if raw_interval is not None else 60
     try:
         loop = asyncio.get_running_loop()
         if _eviction_task is None or _eviction_task.done():

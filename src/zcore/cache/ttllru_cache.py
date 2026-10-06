@@ -28,7 +28,8 @@ class TTLLRUCache:
             maxsize: Cap on the volume of elements cached simultaneously.
                 Defaults to Settings.CACHE_LOCAL_MAXSIZE.
         """
-        self.maxsize = maxsize or getattr(settings, "CACHE_LOCAL_MAXSIZE", 1000)
+        raw_maxsize = maxsize or getattr(settings, "CACHE_LOCAL_MAXSIZE", 1000)
+        self.maxsize: int = int(raw_maxsize) if raw_maxsize is not None else 1000
         self.cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
         self._lock = threading.Lock()
         _active_caches.add(self)

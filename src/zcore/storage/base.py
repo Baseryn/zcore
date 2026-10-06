@@ -7,6 +7,7 @@ provides a FastAPI dependency stub to dynamically resolve storage providers from
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from typing import cast
 
 from fastapi import UploadFile
 
@@ -95,4 +96,4 @@ async def get_storage_provider(provider: Inject[StorageProvider]) -> StorageProv
     Returns:
         The active storage provider instance.
     """
-    return provider
+    return cast(StorageProvider, provider)
