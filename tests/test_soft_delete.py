@@ -61,7 +61,9 @@ class SoftDeleteHookService(BaseService[SoftDeleteTestModel]):
     async def pre_delete_multi(self, ids: list[Any], force: bool = False) -> None:
         self.hooks_called.append(f"pre_delete_multi_force_{force}")
 
-    async def post_delete_multi(self, models: list[SoftDeleteTestModel], force: bool = False) -> None:
+    async def post_delete_multi(
+        self, models: list[SoftDeleteTestModel], force: bool = False
+    ) -> None:
         self.hooks_called.append(f"post_delete_multi_force_{force}")
 
     async def pre_restore(self, id: Any) -> None:
@@ -174,11 +176,7 @@ async def test_soft_delete_search_engine_integration(db_session: Any) -> None:
 
     await repo.delete(item2.id)
 
-    req = SearchRequest(
-        filters=[
-            FilterItem(field="name", op="startswith", value="Product")
-        ]
-    )
+    req = SearchRequest(filters=[FilterItem(field="name", op="startswith", value="Product")])
     search_results = await repo.search(req)
     assert len(search_results) == 2
     result_ids = {r.id for r in search_results}

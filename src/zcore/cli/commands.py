@@ -111,8 +111,10 @@ def setup_virtualenv(project_dir: Path, pkg_manager: str = "pip") -> bool:
                 check=True,
                 capture_output=True,
             )
-            python_bin = project_dir / ".venv" / (
-                "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+            python_bin = (
+                project_dir
+                / ".venv"
+                / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
             )
             subprocess.run(
                 [str(python_bin), "-m", "pip", "install", "-r", "requirements.txt"],
@@ -133,18 +135,14 @@ def init_project(
 ) -> None:
     project_dir = Path(project_name.lower())
     if project_dir.exists():
-        console.print(
-            f"[bold red]❌ Error:[/bold red] Directory '{project_dir}' already exists."
-        )
+        console.print(f"[bold red]❌ Error:[/bold red] Directory '{project_dir}' already exists.")
         sys.exit(1)
 
     project_dir.mkdir(parents=True)
     generated_secret = secrets.token_hex(32)
 
     driver_info = DB_DRIVERS.get(db_driver, DB_DRIVERS["sqlite"])
-    env_content = ENV_TEMPLATE.format(
-        project_name=project_name, secret_key=generated_secret
-    )
+    env_content = ENV_TEMPLATE.format(project_name=project_name, secret_key=generated_secret)
     if db_driver != "sqlite":
         env_content = env_content.replace(
             "DATABASE_URL=sqlite+aiosqlite:///zcore_dev.db",
@@ -199,25 +197,17 @@ def init_project(
     console.print()
 
     console.print("[bold]Next steps:[/bold]")
-    console.print(
-        f"  [dim]1.[/dim] [{ZCORE_ACCENT}]cd[/{ZCORE_ACCENT}] {project_name}"
-    )
+    console.print(f"  [dim]1.[/dim] [{ZCORE_ACCENT}]cd[/{ZCORE_ACCENT}] {project_name}")
     if not install_deps:
         console.print(
             f"  [dim]2.[/dim] [{ZCORE_ACCENT}]pip install -r requirements.txt[/{ZCORE_ACCENT}]"
         )
     else:
         activate_cmd = (
-            ".venv\\Scripts\\activate"
-            if sys.platform == "win32"
-            else "source .venv/bin/activate"
+            ".venv\\Scripts\\activate" if sys.platform == "win32" else "source .venv/bin/activate"
         )
-        console.print(
-            f"  [dim]2.[/dim] [{ZCORE_ACCENT}]{activate_cmd}[/{ZCORE_ACCENT}]"
-        )
-    console.print(
-        f"  [dim]3.[/dim] [{ZCORE_ACCENT}]zc startapp <module_name>[/{ZCORE_ACCENT}]"
-    )
+        console.print(f"  [dim]2.[/dim] [{ZCORE_ACCENT}]{activate_cmd}[/{ZCORE_ACCENT}]")
+    console.print(f"  [dim]3.[/dim] [{ZCORE_ACCENT}]zc startapp <module_name>[/{ZCORE_ACCENT}]")
     console.print(f"  [dim]4.[/dim] [{ZCORE_ACCENT}]zc run[/{ZCORE_ACCENT}]\n")
 
 
@@ -233,9 +223,7 @@ def start_app(
     app_dir = base_dir / app_name.lower()
 
     if app_dir.exists():
-        console.print(
-            f"[bold red]❌ Error:[/bold red] App folder '{app_dir}' already exists."
-        )
+        console.print(f"[bold red]❌ Error:[/bold red] App folder '{app_dir}' already exists.")
         sys.exit(1)
 
     app_dir.mkdir(parents=True)
@@ -260,13 +248,9 @@ def start_app(
 
         resolved_filename = filename_pattern.format(**context)
         use_template = (
-            comp_key in templated_components
-            if templated_components is not None
-            else with_template
+            comp_key in templated_components if templated_components is not None else with_template
         )
-        files_to_create[resolved_filename] = (
-            raw_template.format(**context) if use_template else ""
-        )
+        files_to_create[resolved_filename] = raw_template.format(**context) if use_template else ""
 
     with console.status(
         f"[bold {ZCORE_PRIMARY}]Scaffolding ZCore domain module: '{model_name}'...[/bold {ZCORE_PRIMARY}]",
@@ -314,7 +298,7 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             stripped = line.strip()
             if stripped and not stripped.startswith("#") and "=" in stripped:
                 k, v = stripped.split("=", 1)
-                env_vars[k.strip()] = v.strip().strip('"\'')
+                env_vars[k.strip()] = v.strip().strip("\"'")
     return env_vars
 
 
@@ -392,7 +376,9 @@ def run_server(
         sys.exit(1)
 
     print_step_header(f"Starting ZCore Server ({work_dir.name})")
-    status_info = f"App: {target_app} | Host: {target_host} | Port: {target_port} | Reload: {target_reload}"
+    status_info = (
+        f"App: {target_app} | Host: {target_host} | Port: {target_port} | Reload: {target_reload}"
+    )
     if target_workers:
         status_info += f" | Workers: {target_workers}"
     console.print(f"[dim]│[/dim]  [dim]{status_info}[/dim]")
@@ -404,9 +390,7 @@ def run_server(
     env = os.environ.copy()
     current_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
-        f"{work_dir!s}{os.pathsep}{current_pythonpath}"
-        if current_pythonpath
-        else str(work_dir)
+        f"{work_dir!s}{os.pathsep}{current_pythonpath}" if current_pythonpath else str(work_dir)
     )
 
     cmd = [
@@ -483,11 +467,7 @@ def gen_env(
         else get_settings().__class__
     )
 
-    out_path = (
-        cwd / output_file
-        if not Path(output_file).is_absolute()
-        else Path(output_file)
-    )
+    out_path = cwd / output_file if not Path(output_file).is_absolute() else Path(output_file)
     if out_path.exists() and not force:
         console.print(
             f"[bold red]❌ Error:[/bold red] Output file '{out_path}' already exists. Use --force to overwrite."

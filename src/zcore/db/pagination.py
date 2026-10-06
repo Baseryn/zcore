@@ -241,11 +241,7 @@ class CursorPagination(BasePagination[T]):
         """
         value = getattr(last_item, cursor_field, None)
         if isinstance(value, datetime):
-            value = (
-                value.replace(tzinfo=UTC)
-                if value.tzinfo is None
-                else value.astimezone(UTC)
-            )
+            value = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
             value = value.isoformat()
 
         payload = {"value": value, "pk": str(getattr(last_item, pk_name, ""))}
@@ -286,9 +282,7 @@ class CursorPagination(BasePagination[T]):
         except ValidationError:
             raise
         except Exception as e:
-            raise ValidationError(
-                message="Malformed cursor parameter provided."
-            ) from e
+            raise ValidationError(message="Malformed cursor parameter provided.") from e
 
     async def paginate(
         self, session: AsyncSession, query: Select, params: CursorParams, model: Any
@@ -348,13 +342,9 @@ class CursorPagination(BasePagination[T]):
                 query = query.where(col < val if self.order == "desc" else col > val)
             else:
                 if self.order == "desc":
-                    query = query.where(
-                        or_(col < val, and_(col == val, pk_col < last_pk))
-                    )
+                    query = query.where(or_(col < val, and_(col == val, pk_col < last_pk)))
                 else:
-                    query = query.where(
-                        or_(col > val, and_(col == val, pk_col > last_pk))
-                    )
+                    query = query.where(or_(col > val, and_(col == val, pk_col > last_pk)))
 
         if effective_cursor_field == pk_name:
             query = query.order_by(col.desc() if self.order == "desc" else col.asc())

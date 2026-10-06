@@ -55,7 +55,9 @@ def prompt_init_interactive(project_name: str | None = None, db_driver: str | No
     print_step_header("Initialize New ZCore Project")
 
     if not project_name:
-        project_name = questionary.text("Project directory name:", default="core_api", style=custom_style).ask()
+        project_name = questionary.text(
+            "Project directory name:", default="core_api", style=custom_style
+        ).ask()
         if not project_name:
             print_cancelled()
             return
@@ -99,15 +101,24 @@ def prompt_init_interactive(project_name: str | None = None, db_driver: str | No
             style=custom_style,
         ).ask()
 
-    init_project(project_name, db_driver=db_driver, install_deps=bool(install_deps), pkg_manager=pkg_manager or "pip")
+    init_project(
+        project_name,
+        db_driver=db_driver,
+        install_deps=bool(install_deps),
+        pkg_manager=pkg_manager or "pip",
+    )
 
 
-def prompt_startapp_interactive(app_name: str | None = None, target_dir: Path | None = None) -> None:
+def prompt_startapp_interactive(
+    app_name: str | None = None, target_dir: Path | None = None
+) -> None:
     """Prompt user interactively to scaffold a domain application module."""
     print_step_header("Scaffold ZCore Domain App")
 
     if not app_name:
-        app_name = questionary.text("Domain App / Module name (snake_case):", default="order_management", style=custom_style).ask()
+        app_name = questionary.text(
+            "Domain App / Module name (snake_case):", default="order_management", style=custom_style
+        ).ask()
         if not app_name:
             print_cancelled()
             return
@@ -116,9 +127,16 @@ def prompt_startapp_interactive(app_name: str | None = None, target_dir: Path | 
     scaffold_mode = questionary.select(
         "How would you like to scaffold the domain app?",
         choices=[
-            Choice("1. Full Boilerplate  — Populate all layers with ZCore templates", value="template"),
-            Choice("2. Clean / Blank     — Create clean, empty files for all layers", value="blank"),
-            Choice("3. Custom / Mixed    — Select which layers have templates (others as blank files)", value="custom"),
+            Choice(
+                "1. Full Boilerplate  — Populate all layers with ZCore templates", value="template"
+            ),
+            Choice(
+                "2. Clean / Blank     — Create clean, empty files for all layers", value="blank"
+            ),
+            Choice(
+                "3. Custom / Mixed    — Select which layers have templates (others as blank files)",
+                value="custom",
+            ),
         ],
         style=custom_style,
     ).ask()
@@ -138,7 +156,12 @@ def prompt_startapp_interactive(app_name: str | None = None, target_dir: Path | 
         if not selected:
             console.print("[dim]└[/dim]  [red]Cancelled (no layers selected).[/red]\n")
             return
-        start_app(app_name, target_dir=target_dir, with_template=(scaffold_mode == "template"), selected_components=selected)
+        start_app(
+            app_name,
+            target_dir=target_dir,
+            with_template=(scaffold_mode == "template"),
+            selected_components=selected,
+        )
 
     elif scaffold_mode == "custom":
         templated = questionary.checkbox(
@@ -161,29 +184,39 @@ def interactive_dashboard() -> None:
 
     if is_inside:
         current_name = Path.cwd().name
-        console.print(f"  [dim]Context:[/dim] [bold {ZCORE_PRIMARY}]Active Project ({current_name})[/bold {ZCORE_PRIMARY}]\n")
+        console.print(
+            f"  [dim]Context:[/dim] [bold {ZCORE_PRIMARY}]Active Project ({current_name})[/bold {ZCORE_PRIMARY}]\n"
+        )
         choices = [
             Choice("🧩  startapp   — Scaffold a modular domain app / plugin", value="startapp"),
             Choice("⚡  run        — Launch Uvicorn development server", value="run"),
             Choice("📋  genenv     — Generate template .env from Settings class", value="genenv"),
-            Choice("🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"),
+            Choice(
+                "🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"
+            ),
             Choice("📦  init       — Scaffold another ZCore project", value="init"),
             Choice("🚪  exit       — Exit CLI", value="exit"),
         ]
     elif subprojects:
-        console.print(f"  [dim]Context:[/dim] [bold {ZCORE_ACCENT}]Workspace with {len(subprojects)} detected project(s): {', '.join(subprojects)}[/bold {ZCORE_ACCENT}]\n")
+        console.print(
+            f"  [dim]Context:[/dim] [bold {ZCORE_ACCENT}]Workspace with {len(subprojects)} detected project(s): {', '.join(subprojects)}[/bold {ZCORE_ACCENT}]\n"
+        )
         choices = [
             Choice("⚡  run        — Launch a project dev server", value="run"),
             Choice("🧩  startapp   — Scaffold a domain app inside a project", value="startapp"),
             Choice("📋  genenv     — Generate .env for a project", value="genenv"),
             Choice("📦  init       — Scaffold a new ZCore project", value="init"),
-            Choice("🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"),
+            Choice(
+                "🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"
+            ),
             Choice("🚪  exit       — Exit CLI", value="exit"),
         ]
     else:
         choices = [
             Choice("📦  init       — Scaffold a new full ZCore project", value="init"),
-            Choice("🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"),
+            Choice(
+                "🔑  gensecret  — Generate cryptographically secure SECRET_KEY", value="gensecret"
+            ),
             Choice("🚪  exit       — Exit CLI", value="exit"),
         ]
 
@@ -196,20 +229,34 @@ def interactive_dashboard() -> None:
     if action == "init":
         prompt_init_interactive()
     elif action == "startapp":
-        target_dir = resolve_target_project(subprojects, "Select project to add domain module") if not is_inside and subprojects else None
+        target_dir = (
+            resolve_target_project(subprojects, "Select project to add domain module")
+            if not is_inside and subprojects
+            else None
+        )
         if is_inside or target_dir or not subprojects:
             prompt_startapp_interactive(target_dir=target_dir)
     elif action == "run":
-        target_dir = resolve_target_project(subprojects, "Select project to launch server") if not is_inside and subprojects else None
+        target_dir = (
+            resolve_target_project(subprojects, "Select project to launch server")
+            if not is_inside and subprojects
+            else None
+        )
         if is_inside or target_dir or not subprojects:
             run_server(project_dir=target_dir)
     elif action == "gensecret":
         gen_secret()
     elif action == "genenv":
-        target_dir = resolve_target_project(subprojects, "Select project to generate .env") if not is_inside and subprojects else None
+        target_dir = (
+            resolve_target_project(subprojects, "Select project to generate .env")
+            if not is_inside and subprojects
+            else None
+        )
         if is_inside or target_dir or not subprojects:
             print_step_header("Generate Configuration Schema (.env.example)")
-            filename = questionary.text("Target output filename:", default=".env.example", style=custom_style).ask()
+            filename = questionary.text(
+                "Target output filename:", default=".env.example", style=custom_style
+            ).ask()
             if filename:
                 gen_env(output_file=filename, force=True, project_dir=target_dir)
     elif action == "exit" or action is None:
@@ -221,45 +268,113 @@ def main() -> None:
     """Parse arguments and execute CLI commands supporting transparent option forwarding."""
     try:
         parser = argparse.ArgumentParser(description="ZCore CLI Tool", prog="zc")
-        parser.add_argument("--version", action="store_true", help="Show active ZCore Framework version")
+        parser.add_argument(
+            "--version", action="store_true", help="Show active ZCore Framework version"
+        )
 
-        subparsers = parser.add_subparsers(dest="command", help="Available Framework Orchestration Commands")
+        subparsers = parser.add_subparsers(
+            dest="command", help="Available Framework Orchestration Commands"
+        )
 
-        init_parser = subparsers.add_parser("init", help="Initializes a new ZCore project structure")
-        init_parser.add_argument("name", nargs="?", type=str, default=None, help="Name of your project directory")
-        init_parser.add_argument("--db", type=str, default=None, choices=list(DB_DRIVERS.keys()), help="Target database driver")
-        init_parser.add_argument("-y", "--yes", action="store_true", help="Skip interactive prompts and use defaults")
+        init_parser = subparsers.add_parser(
+            "init", help="Initializes a new ZCore project structure"
+        )
+        init_parser.add_argument(
+            "name", nargs="?", type=str, default=None, help="Name of your project directory"
+        )
+        init_parser.add_argument(
+            "--db",
+            type=str,
+            default=None,
+            choices=list(DB_DRIVERS.keys()),
+            help="Target database driver",
+        )
+        init_parser.add_argument(
+            "-y", "--yes", action="store_true", help="Skip interactive prompts and use defaults"
+        )
 
-        startapp_parser = subparsers.add_parser("startapp", help="Creates a modular ZCore app inside the project")
-        startapp_parser.add_argument("name", nargs="?", type=str, default=None, help="Name of the app/module")
-        startapp_parser.add_argument("--template", action=argparse.BooleanOptionalAction, default=True, help="Populate with boilerplate templates")
-        startapp_parser.add_argument("--test", action=argparse.BooleanOptionalAction, default=True, help="Generate test suite")
-        startapp_parser.add_argument("-y", "--yes", action="store_true", help="Generate all standard architectural layers automatically")
+        startapp_parser = subparsers.add_parser(
+            "startapp", help="Creates a modular ZCore app inside the project"
+        )
+        startapp_parser.add_argument(
+            "name", nargs="?", type=str, default=None, help="Name of the app/module"
+        )
+        startapp_parser.add_argument(
+            "--template",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Populate with boilerplate templates",
+        )
+        startapp_parser.add_argument(
+            "--test",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Generate test suite",
+        )
+        startapp_parser.add_argument(
+            "-y",
+            "--yes",
+            action="store_true",
+            help="Generate all standard architectural layers automatically",
+        )
 
-        run_parser = subparsers.add_parser("run", help="Launches development/production server with cascading config")
-        run_parser.add_argument("app", nargs="?", type=str, default=None, help="Application import string (e.g. main:app)")
-        run_parser.add_argument("--host", type=str, default=None, help="Network interface to bind (overrides .env)")
-        run_parser.add_argument("--port", type=int, default=None, help="TCP port number (overrides .env)")
-        run_parser.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None, help="Enable/disable reload")
-        run_parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
+        run_parser = subparsers.add_parser(
+            "run", help="Launches development/production server with cascading config"
+        )
+        run_parser.add_argument(
+            "app",
+            nargs="?",
+            type=str,
+            default=None,
+            help="Application import string (e.g. main:app)",
+        )
+        run_parser.add_argument(
+            "--host", type=str, default=None, help="Network interface to bind (overrides .env)"
+        )
+        run_parser.add_argument(
+            "--port", type=int, default=None, help="TCP port number (overrides .env)"
+        )
+        run_parser.add_argument(
+            "--reload",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Enable/disable reload",
+        )
+        run_parser.add_argument(
+            "--workers", type=int, default=None, help="Number of worker processes"
+        )
         run_parser.add_argument("--log-level", type=str, default=None, help="Log level verbosity")
-        run_parser.add_argument("--env-file", type=str, default=None, help="Path to custom environment file")
+        run_parser.add_argument(
+            "--env-file", type=str, default=None, help="Path to custom environment file"
+        )
 
-        subparsers.add_parser("gensecret", help="Generates a cryptographically secure 64-character SECRET_KEY")
+        subparsers.add_parser(
+            "gensecret", help="Generates a cryptographically secure 64-character SECRET_KEY"
+        )
 
-        genenv_parser = subparsers.add_parser("genenv", help="Generates template .env based on Settings")
-        genenv_parser.add_argument("-o", "--output", type=str, default=".env.example", help="Target output filepath")
-        genenv_parser.add_argument("-f", "--force", action="store_true", help="Overwrite existing file")
+        genenv_parser = subparsers.add_parser(
+            "genenv", help="Generates template .env based on Settings"
+        )
+        genenv_parser.add_argument(
+            "-o", "--output", type=str, default=".env.example", help="Target output filepath"
+        )
+        genenv_parser.add_argument(
+            "-f", "--force", action="store_true", help="Overwrite existing file"
+        )
 
         args, extra_args = parser.parse_known_args()
 
         if args.version:
-            console.print(f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.2[/bold white]")
+            console.print(
+                f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.2[/bold white]"
+            )
             sys.exit(0)
 
         if args.command == "init":
             if args.yes:
-                init_project(args.name or "core_api", db_driver=args.db or "sqlite", install_deps=False)
+                init_project(
+                    args.name or "core_api", db_driver=args.db or "sqlite", install_deps=False
+                )
             else:
                 prompt_init_interactive(project_name=args.name, db_driver=args.db)
 

@@ -34,29 +34,20 @@ class DummyUser:
     [
         (
             uuid.UUID("12345678-1234-5678-1234-567812345678"),
-            '"12345678-1234-5678-1234-567812345678"'
+            '"12345678-1234-5678-1234-567812345678"',
         ),
+        (datetime.datetime(2026, 7, 2, 10, 0, 0), '"2026-07-02T10:00:00+00:00"'),
+        (datetime.date(2026, 7, 2), '"2026-07-02"'),
+        (datetime.time(10, 0, 0), '"10:00:00"'),
+        (Decimal("123.45"), '"123.45"'),
         (
-            datetime.datetime(2026, 7, 2, 10, 0, 0),
-            '"2026-07-02T10:00:00+00:00"'
+            {
+                "user_id": uuid.UUID("12345678-1234-5678-1234-567812345678"),
+                "balance": Decimal("9.99"),
+            },
+            '{"user_id": "12345678-1234-5678-1234-567812345678", "balance": "9.99"}',
         ),
-        (
-            datetime.date(2026, 7, 2),
-            '"2026-07-02"'
-        ),
-        (
-            datetime.time(10, 0, 0),
-            '"10:00:00"'
-        ),
-        (
-            Decimal("123.45"),
-            '"123.45"'
-        ),
-        (
-            {"user_id": uuid.UUID("12345678-1234-5678-1234-567812345678"), "balance": Decimal("9.99")},
-            '{"user_id": "12345678-1234-5678-1234-567812345678", "balance": "9.99"}'
-        )
-    ]
+    ],
 )
 def test_custom_json_encoder(input_val: Any, expected_output: str) -> None:
     serialized = json_dumps(input_val)
@@ -74,12 +65,9 @@ def test_custom_json_encoder_nested_mixed_types() -> None:
         "list": [
             uuid.UUID("12345678-1234-5678-1234-567812345678"),
             datetime.date(2026, 7, 2),
-            Decimal("10.50")
+            Decimal("10.50"),
         ],
-        "nested": {
-            "time": datetime.time(14, 30, 0),
-            "dt": datetime.datetime(2026, 7, 2, 12, 0, 0)
-        }
+        "nested": {"time": datetime.time(14, 30, 0), "dt": datetime.datetime(2026, 7, 2, 12, 0, 0)},
     }
     serialized = json_dumps(data)
     deserialized = json_loads(serialized)
@@ -119,7 +107,7 @@ def test_custom_json_encoder_kwargs() -> None:
         ("Some - text - here!", "some-text-here"),
         ("---leading-and-trailing---", "leading-and-trailing"),
         ("special#@$chars%^&", "specialchars"),
-    ]
+    ],
 )
 def test_slugify_logic(text: str, expected_slug: str) -> None:
     assert slugify(text) == expected_slug
@@ -145,43 +133,34 @@ def test_slugify_multiple_separators() -> None:
 @pytest.mark.parametrize(
     "data, schema, should_pass, expected_error_msg",
     [
-        (
-            {"type": "object", "properties": {"id": {"type": "integer"}}},
-            None,
-            True,
-            ""
-        ),
+        ({"type": "object", "properties": {"id": {"type": "integer"}}}, None, True, ""),
         (
             {"type": "invalid_type_name_here"},
             None,
             False,
-            "Internal System Error: The defined schema is corrupted or invalid."
+            "Internal System Error: The defined schema is corrupted or invalid.",
         ),
         (
             {"id": 42, "name": "ZCore"},
-            {"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}, "required": ["id"]},
+            {
+                "type": "object",
+                "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                "required": ["id"],
+            },
             True,
-            ""
+            "",
         ),
         (
             {"id": "not_an_integer", "name": "ZCore"},
             {"type": "object", "properties": {"id": {"type": "integer"}}},
             False,
-            "JSON Schema validation failed"
+            "JSON Schema validation failed",
         ),
-        (
-            None,
-            {"type": "object"},
-            True,
-            ""
-        ),
-    ]
+        (None, {"type": "object"}, True, ""),
+    ],
 )
 def test_validate_json_schema(
-    data: Any,
-    schema: dict[str, Any] | None,
-    should_pass: bool,
-    expected_error_msg: str
+    data: Any, schema: dict[str, Any] | None, should_pass: bool, expected_error_msg: str
 ) -> None:
     if should_pass:
         validate_json_schema(data, schema)
@@ -194,14 +173,7 @@ def test_validate_json_schema(
 def test_validate_json_schema_detailed_payload() -> None:
     schema = {
         "type": "object",
-        "properties": {
-            "user": {
-                "type": "object",
-                "properties": {
-                    "age": {"type": "integer"}
-                }
-            }
-        }
+        "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}},
     }
     data = {"user": {"age": "not_an_integer"}}
     with pytest.raises(ValidationError) as exc_info:
@@ -229,9 +201,9 @@ def test_validate_json_schema_array_constraints() -> None:
                 "type": "array",
                 "minItems": 2,
                 "uniqueItems": True,
-                "items": {"type": "string"}
+                "items": {"type": "string"},
             }
-        }
+        },
     }
     valid_data = {"tags": ["admin", "user"]}
     validate_json_schema(valid_data, schema)
@@ -246,10 +218,8 @@ def test_validate_json_schema_array_constraints() -> None:
 def test_validate_json_schema_additional_properties() -> None:
     schema = {
         "type": "object",
-        "properties": {
-            "id": {"type": "integer"}
-        },
-        "additionalProperties": False
+        "properties": {"id": {"type": "integer"}},
+        "additionalProperties": False,
     }
     valid_data = {"id": 1}
     validate_json_schema(valid_data, schema)

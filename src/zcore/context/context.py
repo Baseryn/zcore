@@ -11,9 +11,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Any
 
-_request_context_store: ContextVar[dict[str, Any]] = ContextVar(
-    "request_context_store", default={}
-)
+_request_context_store: ContextVar[dict[str, Any]] = ContextVar("request_context_store", default={})
 
 
 class ZContext:

@@ -152,7 +152,13 @@ async def test_search_all_operators(
     expected_ids: list[int],
 ) -> None:
     engine = SearchEngine(SearchUser)
-    filter_item = FilterItem(field="id" if isinstance(val, int) or (isinstance(val, list) and isinstance(val[0], int)) else "username", op=op, value=val)
+    filter_item = FilterItem(
+        field="id"
+        if isinstance(val, int) or (isinstance(val, list) and isinstance(val[0], int))
+        else "username",
+        op=op,
+        value=val,
+    )
     request = SearchRequest(filters=[filter_item], size=10)
     query = engine.build_base_query(request)
     result = await db_session.execute(query)
@@ -173,7 +179,9 @@ async def test_search_is_null_and_is_not_null(db_session: Any, seed_data: None) 
     res_not_null = await db_session.execute(engine.build_base_query(req_not_null))
     assert {p.id for p in res_not_null.scalars().all()} == {1, 3}
 
-    req_not_null_explicit = SearchRequest(filters=[FilterItem(field="bio", op="is_null", value=False)])
+    req_not_null_explicit = SearchRequest(
+        filters=[FilterItem(field="bio", op="is_null", value=False)]
+    )
     res_not_null_explicit = await db_session.execute(engine.build_base_query(req_not_null_explicit))
     assert {p.id for p in res_not_null_explicit.scalars().all()} == {1, 3}
 
@@ -195,11 +203,7 @@ async def test_search_logical_not_group_operator(db_session: Any, seed_data: Non
     res_not_items = await db_session.execute(engine.build_base_query(req_not_items))
     assert {u.id for u in res_not_items.scalars().all()} == {2}
 
-    req_not_field = SearchRequest(
-        filters=[
-            FilterItem(op="not", field="username", value="guest")
-        ]
-    )
+    req_not_field = SearchRequest(filters=[FilterItem(op="not", field="username", value="guest")])
     res_not_field = await db_session.execute(engine.build_base_query(req_not_field))
     assert {u.id for u in res_not_field.scalars().all()} == {1, 2}
 
@@ -365,7 +369,9 @@ async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> Non
     res_percent = await db_session.execute(engine.build_base_query(req_percent))
     assert {u.id for u in res_percent.scalars().all()} == {1}
 
-    req_underscore = SearchRequest(filters=[FilterItem(field="username", op="ilike", value="user_special")])
+    req_underscore = SearchRequest(
+        filters=[FilterItem(field="username", op="ilike", value="user_special")]
+    )
     res_underscore = await db_session.execute(engine.build_base_query(req_underscore))
     results = list(res_underscore.scalars().all())
     assert {u.id for u in results} == {2}
@@ -374,7 +380,9 @@ async def test_search_wildcard_escaping(db_session: Any, seed_data: None) -> Non
 @pytest.mark.anyio
 async def test_search_type_coercion_date_time(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
-    req = SearchRequest(filters=[FilterItem(field="created_at", op="eq", value="2026-01-02T12:00:00")])
+    req = SearchRequest(
+        filters=[FilterItem(field="created_at", op="eq", value="2026-01-02T12:00:00")]
+    )
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {2}
 
@@ -382,7 +390,9 @@ async def test_search_type_coercion_date_time(db_session: Any, seed_data: None) 
 @pytest.mark.anyio
 async def test_search_type_coercion_uuid(db_session: Any, seed_data: None) -> None:
     engine = SearchEngine(SearchUser)
-    req = SearchRequest(filters=[FilterItem(field="uid", op="eq", value="33333333-3333-3333-3333-333333333333")])
+    req = SearchRequest(
+        filters=[FilterItem(field="uid", op="eq", value="33333333-3333-3333-3333-333333333333")]
+    )
     res = await db_session.execute(engine.build_base_query(req))
     assert {u.id for u in res.scalars().all()} == {3}
 
@@ -425,7 +435,9 @@ def test_search_nested_restricted_field() -> None:
 
     ctx.restricted_fields = {"post.profile.user.password"}
     engine = SearchEngine(SearchComment)
-    req = SearchRequest(filters=[FilterItem(field="post.profile.user.password", op="eq", value="foo")])
+    req = SearchRequest(
+        filters=[FilterItem(field="post.profile.user.password", op="eq", value="foo")]
+    )
     with pytest.raises(ForbiddenError) as exc_info:
         engine.build_base_query(req)
     assert "restricted" in str(exc_info.value).lower()
@@ -504,18 +516,24 @@ async def test_search_type_coercion_set_and_iterables(db_session: Any, seed_data
 
 
 @pytest.mark.anyio
-async def test_search_text_operators_on_non_string_columns_cast(db_session: Any, seed_data: None) -> None:
+async def test_search_text_operators_on_non_string_columns_cast(
+    db_session: Any, seed_data: None
+) -> None:
     engine = SearchEngine(SearchUser)
 
     req_ilike = SearchRequest(filters=[FilterItem(field="id", op="ilike", value="1")])
     res_ilike = await db_session.execute(engine.build_base_query(req_ilike))
     assert {u.id for u in res_ilike.scalars().all()} == {1}
 
-    req_startswith = SearchRequest(filters=[FilterItem(field="uid", op="startswith", value="22222222")])
+    req_startswith = SearchRequest(
+        filters=[FilterItem(field="uid", op="startswith", value="22222222")]
+    )
     res_startswith = await db_session.execute(engine.build_base_query(req_startswith))
     assert {u.id for u in res_startswith.scalars().all()} == {2}
 
-    req_endswith = SearchRequest(filters=[FilterItem(field="uid", op="endswith", value="333333333333")])
+    req_endswith = SearchRequest(
+        filters=[FilterItem(field="uid", op="endswith", value="333333333333")]
+    )
     res_endswith = await db_session.execute(engine.build_base_query(req_endswith))
     assert {u.id for u in res_endswith.scalars().all()} == {3}
 

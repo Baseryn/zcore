@@ -29,9 +29,7 @@ _memory_cost = getattr(settings, "ARGON2_MEMORY_COST", 65536)  # 64 MB
 _time_cost = getattr(settings, "ARGON2_TIME_COST", 3)  # 3 iterations
 _parallelism = getattr(settings, "ARGON2_PARALLELISM", 4)  # 4 threads
 
-ph = PasswordHasher(
-    memory_cost=_memory_cost, time_cost=_time_cost, parallelism=_parallelism
-)
+ph = PasswordHasher(memory_cost=_memory_cost, time_cost=_time_cost, parallelism=_parallelism)
 
 
 class Security:
@@ -106,9 +104,7 @@ class Security:
             return private_key, public_key, settings.ALGORITHM
 
         is_prod = getattr(settings, "DEBUG", False) is False
-        is_fallback = (
-            settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
-        )
+        is_fallback = settings.SECRET_KEY == "zcore-insecure-fallback-secret-key-must-be-changed"
 
         if is_prod and is_fallback:
             raise RuntimeError(

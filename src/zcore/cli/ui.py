@@ -11,15 +11,17 @@ ZCORE_ACCENT = "#06b6d4"
 ZCORE_MUTED = "#64748b"
 ZCORE_TEXT = "#f8fafc"
 
-custom_style = Style([
-    ("qmark", f"fg:{ZCORE_PRIMARY} bold"),
-    ("question", f"fg:{ZCORE_TEXT} bold"),
-    ("answer", f"fg:{ZCORE_PRIMARY} bold"),
-    ("pointer", f"fg:{ZCORE_PRIMARY} bold"),
-    ("highlighted", f"fg:{ZCORE_PRIMARY} bold"),
-    ("selected", f"fg:{ZCORE_PRIMARY}"),
-    ("instruction", f"fg:{ZCORE_MUTED} italic"),
-])
+custom_style = Style(
+    [
+        ("qmark", f"fg:{ZCORE_PRIMARY} bold"),
+        ("question", f"fg:{ZCORE_TEXT} bold"),
+        ("answer", f"fg:{ZCORE_PRIMARY} bold"),
+        ("pointer", f"fg:{ZCORE_PRIMARY} bold"),
+        ("highlighted", f"fg:{ZCORE_PRIMARY} bold"),
+        ("selected", f"fg:{ZCORE_PRIMARY}"),
+        ("instruction", f"fg:{ZCORE_MUTED} italic"),
+    ]
+)
 
 
 def print_banner() -> None:

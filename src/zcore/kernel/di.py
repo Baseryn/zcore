@@ -109,13 +109,9 @@ class IoCContainer:
         if scope_id is not None and current_instances is not None:
             current_instances[interface] = instance
         else:
-            raise DIException(
-                "Cannot register scoped instance outside of an active scope."
-            )
+            raise DIException("Cannot register scoped instance outside of an active scope.")
 
-    def register_transient(
-        self, interface: type[Any], implementation: type[Any]
-    ) -> None:
+    def register_transient(self, interface: type[Any], implementation: type[Any]) -> None:
         """Register a class bound to a transient lifecycle.
 
         Transient classes are constructed as a new instance on every resolution request.
@@ -124,9 +120,7 @@ class IoCContainer:
             interface: The interface or class type key to map against.
             implementation: The target implementation class to instantiate.
         """
-        self._factories[interface] = lambda stack=None: self._auto_wire(
-            implementation, stack
-        )
+        self._factories[interface] = lambda stack=None: self._auto_wire(implementation, stack)
 
     def resolve(self, interface: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Resolve a specific interface or type dependency.
@@ -165,9 +159,7 @@ class IoCContainer:
 
         return self._auto_wire(interface, _stack)
 
-    def _auto_wire(
-        self, target_class: type[T], _stack: set[type[Any]] | None = None
-    ) -> T:
+    def _auto_wire(self, target_class: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Analyze, resolve parameters, and construct a class instance.
 
         Leverages constructor cache values and metadata reflection to construct targets.
@@ -189,10 +181,7 @@ class IoCContainer:
 
         _stack = _stack or set()
         if target_class in _stack:
-            chain = (
-                " -> ".join([c.__name__ for c in _stack])
-                + f" -> {target_class.__name__}"
-            )
+            chain = " -> ".join([c.__name__ for c in _stack]) + f" -> {target_class.__name__}"
             raise CircularDependencyError(f"Circular dependency detected: {chain}")
 
         _stack.add(target_class)
@@ -200,9 +189,7 @@ class IoCContainer:
         try:
             if target_class in self._dependency_signature_cache:
                 dependencies = self._dependency_signature_cache[target_class]
-                resolved_args = [
-                    self.resolve(dep, _stack.copy()) for dep in dependencies
-                ]
+                resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
                 return target_class(*resolved_args)
 
             if target_class not in self._constructor_cache:
@@ -416,8 +403,6 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
             _warn_if_closed_session_passed(args, kwargs)
             async with background_scope():
                 final_kwargs = _resolve_injections(args, kwargs)
-                return await to_thread.run_sync(
-                    functools.partial(func, *args, **final_kwargs)
-                )
+                return await to_thread.run_sync(functools.partial(func, *args, **final_kwargs))
 
         return sync_wrapper

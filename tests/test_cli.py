@@ -209,7 +209,9 @@ def test_cli_run_outside_project_root(run_in_tmp_path: Path) -> None:
 
 def test_cli_run_default_cascading(run_in_tmp_path: Path) -> None:
     (run_in_tmp_path / "main.py").touch()
-    (run_in_tmp_path / ".env").write_text("HOST=127.0.0.1\nPORT=8080\nLOG_LEVEL=warning\n", encoding="utf-8")
+    (run_in_tmp_path / ".env").write_text(
+        "HOST=127.0.0.1\nPORT=8080\nLOG_LEVEL=warning\n", encoding="utf-8"
+    )
     test_args = ["zc", "run"]
 
     with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):

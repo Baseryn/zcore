@@ -136,18 +136,12 @@ class StreamManager:
                         if not self.users_queues[k]:
                             del self.users_queues[k]
 
-            if (
-                not self.users_queues
-                and self._pubsub_task
-                and not self._pubsub_task.done()
-            ):
+            if not self.users_queues and self._pubsub_task and not self._pubsub_task.done():
                 self._pubsub_task.cancel()
                 self._pubsub_task = None
 
     @asynccontextmanager
-    async def subscription(
-        self, user_id: Any
-    ) -> AsyncGenerator[asyncio.Queue[Any], None]:
+    async def subscription(self, user_id: Any) -> AsyncGenerator[asyncio.Queue[Any], None]:
         """Context manager safely wrapping active user event streams.
 
         Args:

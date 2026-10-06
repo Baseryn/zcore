@@ -64,9 +64,7 @@ def setup_logging(
         level = getattr(logging, cfg_level_str.upper(), logging.INFO)
 
     is_json = (
-        cfg.json_format
-        if cfg.json_format is not None
-        else not getattr(settings, "DEBUG", False)
+        cfg.json_format if cfg.json_format is not None else not getattr(settings, "DEBUG", False)
     )
 
     if not is_json:

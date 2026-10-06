@@ -11,7 +11,10 @@ from zcore.context.context import _request_context_store, ctx
     "user_id_input, expected_output",
     [
         ("12345678-1234-5678-1234-567812345678", "12345678-1234-5678-1234-567812345678"),
-        (uuid.UUID("12345678-1234-5678-1234-567812345678"), uuid.UUID("12345678-1234-5678-1234-567812345678")),
+        (
+            uuid.UUID("12345678-1234-5678-1234-567812345678"),
+            uuid.UUID("12345678-1234-5678-1234-567812345678"),
+        ),
         (None, None),
         ("custom-string-id", "custom-string-id"),
         (12345, 12345),

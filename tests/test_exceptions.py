@@ -73,9 +73,19 @@ def test_exception_status_codes(
     "exc_to_raise, expected_status, expected_msg, expected_meta_payload",
     [
         (EntityNotFound("Item missing", {"id": "abc"}), 404, "Item missing", {"id": "abc"}),
-        (ValidationError("Bad request", {"reason": "missing field"}), 400, "Bad request", {"reason": "missing field"}),
+        (
+            ValidationError("Bad request", {"reason": "missing field"}),
+            400,
+            "Bad request",
+            {"reason": "missing field"},
+        ),
         (AuthError("Unauthorized session", None), 401, "Unauthorized session", None),
-        (DuplicateEntity("Conflict record", {"field": "email"}), 409, "Conflict record", {"field": "email"}),
+        (
+            DuplicateEntity("Conflict record", {"field": "email"}),
+            409,
+            "Conflict record",
+            {"field": "email"},
+        ),
         (ForbiddenError("Access denied", None), 403, "Access denied", None),
     ],
 )

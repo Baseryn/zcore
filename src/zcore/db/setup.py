@@ -86,9 +86,7 @@ class Base(DeclarativeBase):
         """
         t_name = getattr(cls, "__tablename__", None)
         if not t_name:
-            raise AttributeError(
-                f"Model {cls.__name__} does not have a __tablename__ defined."
-            )
+            raise AttributeError(f"Model {cls.__name__} does not have a __tablename__ defined.")
         return Actions.actions(t_name)
 
 
@@ -119,21 +117,15 @@ class DatabaseManager:
         db_logger = structlog.get_logger(f"zcore.db.{dialect_name}")
 
         @event.listens_for(sync_engine, "before_cursor_execute")
-        def before_cursor_execute(
-            conn, cursor, statement, parameters, context, exec_many
-        ):
+        def before_cursor_execute(conn, cursor, statement, parameters, context, exec_many):
             context._query_start_time = time.perf_counter()
 
         @event.listens_for(sync_engine, "after_cursor_execute")
-        def after_cursor_execute(
-            conn, cursor, statement, parameters, context, exec_many
-        ):
+        def after_cursor_execute(conn, cursor, statement, parameters, context, exec_many):
             logging_cfg = getattr(settings, "LOGGING", None)
             should_log_queries = getattr(logging_cfg, "log_sql_queries", False)
             slow_threshold = (
-                getattr(logging_cfg, "slow_query_threshold_ms", None)
-                if logging_cfg
-                else None
+                getattr(logging_cfg, "slow_query_threshold_ms", None) if logging_cfg else None
             )
 
             if not should_log_queries and slow_threshold is None:
@@ -279,9 +271,7 @@ class DatabaseManager:
         if self._engine:
             await self._engine.dispose()
 
-            dialect_logger = structlog.get_logger(
-                f"zcore.db.{self._engine.dialect.name}"
-            )
+            dialect_logger = structlog.get_logger(f"zcore.db.{self._engine.dialect.name}")
             dialect_logger.debug("DatabaseManager engine connections closed.")
 
     @asynccontextmanager
@@ -297,9 +287,7 @@ class DatabaseManager:
                 an automatic rollback before propagating.
         """
         if not self._session_factory:
-            raise RuntimeError(
-                "DatabaseManager has not been initialized. Call init_app() first."
-            )
+            raise RuntimeError("DatabaseManager has not been initialized. Call init_app() first.")
 
         async with self._session_factory() as session:
             try:

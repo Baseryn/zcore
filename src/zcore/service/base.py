@@ -113,9 +113,7 @@ class ReadServiceMixin(AbstractService[ModelType]):
         Raises:
             EntityNotFound: If the target entity identifier is not found in the database.
         """
-        result = await self.repository.get(
-            *criterion, fields=fields, options=options, **filters
-        )
+        result = await self.repository.get(*criterion, fields=fields, options=options, **filters)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         return await self.post_get(result)
@@ -192,9 +190,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after modifying a single record."""
         pass
 
-    async def pre_update_multi(
-        self, data: dict[ModelType | Any, BaseModel], partial: bool
-    ) -> None:
+    async def pre_update_multi(self, data: dict[ModelType | Any, BaseModel], partial: bool) -> None:
         """Hook triggered prior to updating a batch of records."""
         pass
 
@@ -214,9 +210,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered prior to deleting a batch of records."""
         pass
 
-    async def post_delete_multi(
-        self, models: Sequence[ModelType], force: bool = False
-    ) -> None:
+    async def post_delete_multi(self, models: Sequence[ModelType], force: bool = False) -> None:
         """Hook triggered after deleting a batch of records."""
         pass
 
@@ -275,15 +269,11 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
 
-    async def on_delete(
-        self, target: ModelType | Any, force: bool = False
-    ) -> ModelType | None:
+    async def on_delete(self, target: ModelType | Any, force: bool = False) -> ModelType | None:
         """Execute core single-record deletion in database."""
         return await self.repository.delete(target, force=force)
 
-    async def on_delete_multi(
-        self, ids: list[Any], force: bool = False
-    ) -> Sequence[ModelType]:
+    async def on_delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
         """Execute core batch-record deletions in database."""
         return await self.repository.delete_multi(ids, force=force)
 
@@ -354,9 +344,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def delete_multi(
-        self, ids: list[Any], force: bool = False
-    ) -> Sequence[ModelType]:
+    async def delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
         """Orchestrate batch deletions of multiple database records."""
         await self.pre_delete_multi(ids, force=force)
         result = await self.on_delete_multi(ids, force=force)
@@ -369,9 +357,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self.pre_restore(target)
         result = await self.on_restore(target)
         if not result:
-            raise EntityNotFound(
-                message=f"{self.model.__name__} not found or not soft-deleted."
-            )
+            raise EntityNotFound(message=f"{self.model.__name__} not found or not soft-deleted.")
         await self.post_restore(result)
         await self._safe_commit()
         return result

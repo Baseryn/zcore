@@ -120,9 +120,13 @@ async def test_repo_create_multi_empty_and_filled(
         (False, None),
     ],
 )
-async def test_repo_partial_update(db_session: Any, partial: bool, expected_desc: str | None) -> None:
+async def test_repo_partial_update(
+    db_session: Any, partial: bool, expected_desc: str | None
+) -> None:
     repo = RepoTestRepository(db_session)
-    created = await repo.create(RepoTestCreateSchema(name="Original Name", description="Original Desc"))
+    created = await repo.create(
+        RepoTestCreateSchema(name="Original Name", description="Original Desc")
+    )
 
     update_schema = RepoTestUpdateSchema(name="Updated Name")
     updated = await repo.update(created.id, update_schema, partial=partial)
@@ -322,7 +326,9 @@ async def test_repo_search_with_fields_and_options(db_session: Any) -> None:
     await repo.create(RepoTestCreateSchema(name="LookupItem2", description="DeepDescription2"))
 
     req = SearchRequest(filters=[FilterItem(field="name", op="startswith", value="Lookup")])
-    res = await repo.search(req, fields=[RepoTestModel.id, RepoTestModel.name], options=[load_only(RepoTestModel.name)])
+    res = await repo.search(
+        req, fields=[RepoTestModel.id, RepoTestModel.name], options=[load_only(RepoTestModel.name)]
+    )
     assert len(res) == 2
     assert res[0].name == "LookupItem1"
     assert res[1].name == "LookupItem2"
@@ -334,16 +340,14 @@ async def test_repo_search_security_violation(db_session: Any) -> None:
 
     token = ctx.initialize()
     table_suffix = RepoTestModel.__tablename__.split("_")[-1]
-    ctx.restricted_fields = frozenset([
-        "description",
-        f"repo_test_model_{table_suffix}.description",
-    ])
-
-    req = SearchRequest(
-        filters=[
-            FilterItem(field="description", op="eq", value="Fruit")
+    ctx.restricted_fields = frozenset(
+        [
+            "description",
+            f"repo_test_model_{table_suffix}.description",
         ]
     )
+
+    req = SearchRequest(filters=[FilterItem(field="description", op="eq", value="Fruit")])
 
     try:
         with pytest.raises(ForbiddenError):

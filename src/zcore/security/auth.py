@@ -50,8 +50,8 @@ class BaseAuth(Generic[T]):
         self.identity_claim = identity_claim
         self.token_type = token_type
         self.auto_error = auto_error
-        self.cache_ttl = cache_ttl if cache_ttl is not None else getattr(
-            settings, "AUTH_CACHE_TTL", 300
+        self.cache_ttl = (
+            cache_ttl if cache_ttl is not None else getattr(settings, "AUTH_CACHE_TTL", 300)
         )
         self.cache = BaseCache(prefix=cache_prefix, default_ttl=self.cache_ttl)
 
@@ -109,9 +109,7 @@ class BaseAuth(Generic[T]):
                 raise AuthError(message="User inactive or not found.")
 
             user_data = self.user_schema.model_validate(db_user)
-            await self.cache.set(
-                cache_key, user_data.model_dump(mode="json"), ttl=self.cache_ttl
-            )
+            await self.cache.set(cache_key, user_data.model_dump(mode="json"), ttl=self.cache_ttl)
 
         if not getattr(user_data, "is_active", True):
             if not self.auto_error:

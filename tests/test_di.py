@@ -142,7 +142,7 @@ def reset_container() -> None:
     [
         (IService, ServiceImpl),
         (ForwardB, ForwardB),
-    ]
+    ],
 )
 def test_resolve_singleton(interface: type[Any], implementation: type[Any]) -> None:
     instance = implementation()
@@ -161,13 +161,10 @@ def test_resolve_singleton(interface: type[Any], implementation: type[Any]) -> N
     [
         (IService, ServiceImpl, "scope-a", "scope-b"),
         (ForwardB, ForwardB, "scope-x", "scope-y"),
-    ]
+    ],
 )
 def test_resolve_scoped(
-    interface: type[Any],
-    implementation: type[Any],
-    scope_1: str,
-    scope_2: str
+    interface: type[Any], implementation: type[Any], scope_1: str, scope_2: str
 ) -> None:
     container.register_scoped(interface, implementation)
 
@@ -186,7 +183,7 @@ def test_resolve_scoped(
     [
         (IService, ServiceImpl),
         (ForwardB, ForwardB),
-    ]
+    ],
 )
 def test_resolve_transient(interface: type[Any], implementation: type[Any]) -> None:
     container.register_transient(interface, implementation)
@@ -203,7 +200,7 @@ def test_resolve_transient(interface: type[Any], implementation: type[Any]) -> N
     "registrations",
     [
         {"A": CircA, "B": CircB},
-    ]
+    ],
 )
 def test_circular_dependency(registrations: dict[str, type[Any]]) -> None:
     container.register_transient(CircA, registrations["A"])
@@ -221,7 +218,7 @@ def test_circular_dependency(registrations: dict[str, type[Any]]) -> None:
     "target, dep",
     [
         (ForwardA, ForwardB),
-    ]
+    ],
 )
 def test_forward_reference_resolution(target: type[Any], dep: type[Any]) -> None:
     container.register_transient(dep, dep)
@@ -484,9 +481,7 @@ async def test_background_task_multiple_injections() -> None:
 
     @background_task
     async def multi_dep_job(
-        w1: BackgroundTaskWorker,
-        w2: SecondaryWorker,
-        tag: str = "default_tag"
+        w1: BackgroundTaskWorker, w2: SecondaryWorker, tag: str = "default_tag"
     ) -> tuple[uuid.UUID, uuid.UUID, str]:
         return w1.id, w2.id, tag
 
@@ -544,7 +539,10 @@ async def test_background_task_warns_when_async_session_passed() -> None:
         res_kw = await async_job_with_session(session=mock_session, name="kw_call")
         assert res_kw == "kw_call"
         mock_warn.assert_called_once()
-        assert "Passing an existing AsyncSession directly via argument 'session'" in mock_warn.call_args[0][0]
+        assert (
+            "Passing an existing AsyncSession directly via argument 'session'"
+            in mock_warn.call_args[0][0]
+        )
 
     with patch("zcore.kernel.di.logger.warning") as mock_warn:
         res_sync = await sync_job_with_session(mock_session, 100)

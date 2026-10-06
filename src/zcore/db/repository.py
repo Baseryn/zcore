@@ -134,11 +134,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
         result = await self.db.execute(query)
         return result.scalars().first()
 
@@ -165,11 +161,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
         result = await self.db.execute(query)
         return result.scalars().all()
 
@@ -198,11 +190,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
 
         if pagination is None:
             result = await self.db.execute(query)
@@ -365,9 +353,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         return await self.get_by_ids(ids=target_ids)
 
-    async def delete(
-        self, target: ModelType | Any, force: bool = False
-    ) -> ModelType | None:
+    async def delete(self, target: ModelType | Any, force: bool = False) -> ModelType | None:
         """Delete a single record, applying soft deletion if supported unless forced.
 
         Args:
@@ -381,9 +367,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             record = target
         else:
             if force:
-                query = select(self.model).where(
-                    getattr(self.model, self.pk_name) == target
-                )
+                query = select(self.model).where(getattr(self.model, self.pk_name) == target)
                 result = await self.db.execute(query)
                 record = result.scalars().first()
             else:
@@ -402,9 +386,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         await self.db.flush()
         return record
 
-    async def delete_multi(
-        self, ids: list[Any], force: bool = False
-    ) -> Sequence[ModelType]:
+    async def delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
         """Delete multiple records by primary keys, using atomic soft update or hard delete.
 
         Args:
@@ -421,9 +403,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         supports_returning = bool(getattr(dialect, "delete_returning", False))
 
         if not force and self._supports_soft_delete():
-            supports_update_returning = bool(
-                getattr(dialect, "update_returning", False)
-            )
+            supports_update_returning = bool(getattr(dialect, "update_returning", False))
             deletion_time = now()
             stmt = (
                 update(self.model)
@@ -473,9 +453,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if isinstance(target, self.model):
             record = target
         else:
-            query = select(self.model).where(
-                getattr(self.model, self.pk_name) == target
-            )
+            query = select(self.model).where(getattr(self.model, self.pk_name) == target)
             result = await self.db.execute(query)
             record = result.scalars().first()
             if not record:
@@ -518,6 +496,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         query = select(self.model).where(self.pk.in_(ids))
         res = await self.db.execute(query)
         return list(res.scalars().all())
+
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
     """Mixin coordinating structured application search operations."""
@@ -567,6 +546,7 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             else PageNumberPagination()
         )
         return await paginator.paginate(self.db, query, pagination, self.model)
+
 
 class BaseRepository(
     Generic[ModelType],

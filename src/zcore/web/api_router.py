@@ -53,9 +53,7 @@ class ZCoreJSONResponse(JSONResponse):
 def find_input_schema(dependant: Any) -> type[BaseModel] | None:
     """Analyze FastAPI dependency models to find the body input Pydantic schema."""
     for param in getattr(dependant, "body_params", []):
-        annotation = getattr(param.field_info, "annotation", None) or getattr(
-            param, "type_", None
-        )
+        annotation = getattr(param.field_info, "annotation", None) or getattr(param, "type_", None)
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
             return annotation
     return None
@@ -99,9 +97,7 @@ class ZCoreAPIRoute(APIRoute):
         self.target_model = None
 
         if self.expose_schema:
-            if self.methods and any(
-                m in ["POST", "PUT", "PATCH"] for m in self.methods
-            ):
+            if self.methods and any(m in ["POST", "PUT", "PATCH"] for m in self.methods):
                 self.target_model = find_input_schema(self.dependant)
             else:
                 self.target_model = find_output_schema(self.response_model)
@@ -136,10 +132,7 @@ class ZCoreAPIRoute(APIRoute):
 
             ctx.set("action", custom_action)
 
-            if (
-                self.expose_schema
-                and zcore_request.query_params.get("schema") == "true"
-            ):
+            if self.expose_schema and zcore_request.query_params.get("schema") == "true":
                 if not self.target_model:
                     return JSONResponse(
                         status_code=400,
@@ -165,23 +158,18 @@ class ZCoreAPIRoute(APIRoute):
             hidden_fields = ctx.restricted_fields
             if (
                 hidden_fields
-                and "application/json"
-                in response.headers.get("content-type", "").lower()
+                and "application/json" in response.headers.get("content-type", "").lower()
             ):
                 vary = response.headers.get("vary", "")
                 target_vary_headers = ["Authorization", "Cookie"]
-                existing_vary = (
-                    [v.strip().lower() for v in vary.split(",")] if vary else []
-                )
+                existing_vary = [v.strip().lower() for v in vary.split(",")] if vary else []
 
                 new_vary_elements = [
                     v for v in target_vary_headers if v.lower() not in existing_vary
                 ]
                 if new_vary_elements:
                     if vary:
-                        response.headers["vary"] = (
-                            f"{vary}, {', '.join(new_vary_elements)}"
-                        )
+                        response.headers["vary"] = f"{vary}, {', '.join(new_vary_elements)}"
                     else:
                         response.headers["vary"] = ", ".join(new_vary_elements)
                 return response

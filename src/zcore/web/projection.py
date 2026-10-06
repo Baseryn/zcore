@@ -100,17 +100,13 @@ class Zchema(BaseModel):
                     data[key] = cls._prune_data(val, rem_paths)
                 elif isinstance(val, list):
                     data[key] = [
-                        cls._prune_data(item, rem_paths)
-                        if isinstance(item, dict)
-                        else item
+                        cls._prune_data(item, rem_paths) if isinstance(item, dict) else item
                         for item in val
                     ]
         return data
 
     @classmethod
-    def __get_pydantic_json_schema__(
-        cls, core_schema: Any, handler: Any
-    ) -> dict[str, Any]:
+    def __get_pydantic_json_schema__(cls, core_schema: Any, handler: Any) -> dict[str, Any]:
         """Customize dynamic JSON schema generation under context boundaries."""
         json_schema = handler(core_schema)
         relative_paths = cls._get_relative_restricted_paths()

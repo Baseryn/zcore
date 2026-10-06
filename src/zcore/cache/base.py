@@ -42,9 +42,7 @@ def _ensure_eviction_task(interval: int | None = None) -> None:
     try:
         loop = asyncio.get_running_loop()
         if _eviction_task is None or _eviction_task.done():
-            _eviction_task = loop.create_task(
-                _start_eviction_loop(interval=effective_interval)
-            )
+            _eviction_task = loop.create_task(_start_eviction_loop(interval=effective_interval))
     except RuntimeError:
         pass
 
@@ -129,12 +127,8 @@ class BaseCache(Generic[T]):
             default_ttl: Optional default expiration limit in seconds.
         """
         self.prefix = prefix
-        self.default_ttl = default_ttl or getattr(
-            settings, "CACHE_DEFAULT_TTL", 3600
-        )
-        effective_maxsize = local_maxsize or getattr(
-            settings, "CACHE_LOCAL_MAXSIZE", 1000
-        )
+        self.default_ttl = default_ttl or getattr(settings, "CACHE_DEFAULT_TTL", 3600)
+        effective_maxsize = local_maxsize or getattr(settings, "CACHE_LOCAL_MAXSIZE", 1000)
         self._local_cache = TTLLRUCache(maxsize=effective_maxsize)
 
     @property
@@ -189,11 +183,7 @@ class BaseCache(Generic[T]):
             return None
 
         try:
-            parsed_data = (
-                json_loads(raw_val)
-                if isinstance(raw_val, (str, bytes))
-                else raw_val
-            )
+            parsed_data = json_loads(raw_val) if isinstance(raw_val, (str, bytes)) else raw_val
 
             if target_type and issubclass(target_type, BaseModel):
                 return target_type.model_validate(parsed_data)

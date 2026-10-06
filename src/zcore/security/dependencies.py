@@ -20,9 +20,7 @@ async def get_current_user_stub() -> UserProtocol:
     Raises:
         NotImplementedError: If invoked directly without a configured dependency override.
     """
-    raise NotImplementedError(
-        "Dependency override is required for get_current_user_stub"
-    )
+    raise NotImplementedError("Dependency override is required for get_current_user_stub")
 
 
 async def get_optional_user_stub() -> UserProtocol | None:

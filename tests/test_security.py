@@ -60,7 +60,10 @@ def test_argon2_hashing(plain_pwd: str, candidate_pwd: str, is_match: bool) -> N
     hashed = Security.hash_password(plain_pwd)
     assert Security.verify_password(candidate_pwd, hashed) is is_match
     assert Security.verify_password(plain_pwd, "invalid_hash_structure") is False
-    assert Security.verify_password(plain_pwd, "$argon2id$v=19$m=65536,t=3,p=4$corruptpayload") is False
+    assert (
+        Security.verify_password(plain_pwd, "$argon2id$v=19$m=65536,t=3,p=4$corruptpayload")
+        is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -79,7 +82,9 @@ def test_jwt_symmetric_flow(payload: dict[str, Any]) -> None:
 
 def test_jwt_production_safety_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "DEBUG", False)
-    monkeypatch.setattr(settings, "SECRET_KEY", "zcore-insecure-fallback-secret-key-must-be-changed")
+    monkeypatch.setattr(
+        settings, "SECRET_KEY", "zcore-insecure-fallback-secret-key-must-be-changed"
+    )
     with pytest.raises(RuntimeError) as exc_info:
         Security._get_signing_keys()
     assert "FATAL SECURITY VIOLATION" in str(exc_info.value)
@@ -110,7 +115,9 @@ async def test_scope_permissions(
             await permission(mock_request, user=None)
         assert "Authentication required" in str(exc_info.value)
     else:
-        user = MockUser(uuid.uuid4(), is_active=user_active, is_superuser=user_superuser, scopes=user_scopes)
+        user = MockUser(
+            uuid.uuid4(), is_active=user_active, is_superuser=user_superuser, scopes=user_scopes
+        )
         if expected_error:
             with pytest.raises(expected_error):
                 await permission(mock_request, user=user)
@@ -263,6 +270,7 @@ def test_argoncustom_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
         from importlib import reload
 
         import zcore.security.security
+
         reload(zcore.security.security)
 
         hashed = zcore.security.security.Security.hash_password("pass")
@@ -272,6 +280,7 @@ def test_argoncustom_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
         from importlib import reload
 
         import zcore.security.security
+
         reload(zcore.security.security)
 
 

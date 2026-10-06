@@ -151,9 +151,7 @@ class SearchEngine:
             getattr(settings, "SEARCH_MAX_DEPTH", 3),
         )
 
-    def register_handler(
-        self, field_name: str, handler: Callable[[Any], Any]
-    ) -> SearchEngine:
+    def register_handler(self, field_name: str, handler: Callable[[Any], Any]) -> SearchEngine:
         """Bind a custom callback handler to parse a specific field's values dynamically.
 
         Args:
@@ -231,9 +229,7 @@ class SearchEngine:
                 for part in parts:
                     rel = inspect(current_model).relationships.get(part)
                     if not rel:
-                        raise ValidationError(
-                            message=f"Invalid include relation path: '{path}'"
-                        )
+                        raise ValidationError(message=f"Invalid include relation path: '{path}'")
                     current_model = rel.mapper.class_
 
         if search_in.sort:
@@ -315,9 +311,7 @@ class SearchEngine:
             ValidationError: If the query filter structure exceeds nesting thresholds.
         """
         if current_depth > max_depth:
-            raise ValidationError(
-                message="Search query filter structure is too complex."
-            )
+            raise ValidationError(message="Search query filter structure is too complex.")
 
         for f in filters:
             if f.op in ("or", "and", "not"):
@@ -373,9 +367,7 @@ class SearchEngine:
                     return None
                 return not_(and_(*sub_exprs))
             elif f.field:
-                expr = self._build_expression_for_field(
-                    self.model, f.field, "eq", f.value
-                )
+                expr = self._build_expression_for_field(self.model, f.field, "eq", f.value)
                 return not_(expr) if expr is not None else None
 
         if f.field in self.custom_handlers:
@@ -417,9 +409,7 @@ class SearchEngine:
         target_model = rel.mapper.class_
         remaining_path = ".".join(parts[1:])
 
-        sub_expr = self._build_expression_for_field(
-            target_model, remaining_path, op, value
-        )
+        sub_expr = self._build_expression_for_field(target_model, remaining_path, op, value)
         if sub_expr is None:
             return None
 
@@ -504,14 +494,10 @@ class SearchEngine:
         base_op = op[4:] if is_negated else op
 
         if base_op in ("like", "ilike", "contains", "startswith", "endswith"):
-            escaped_value = self._escape_like_wildcards(
-                str(value) if value is not None else ""
-            )
+            escaped_value = self._escape_like_wildcards(str(value) if value is not None else "")
 
             try:
-                is_str = (
-                    hasattr(col.type, "python_type") and col.type.python_type is str
-                )
+                is_str = hasattr(col.type, "python_type") and col.type.python_type is str
             except (NotImplementedError, AttributeError):
                 is_str = False
 

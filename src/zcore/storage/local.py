@@ -125,7 +125,9 @@ class LocalStorageProvider(StorageProvider):
         normalized_folder = folder.strip("/\\").replace("\\", "/")
         ext = StdPath(filename).suffix.lower()
         secure_filename = f"{uuid.uuid4().hex}{ext}"
-        storage_key = f"{normalized_folder}/{secure_filename}" if normalized_folder else secure_filename
+        storage_key = (
+            f"{normalized_folder}/{secure_filename}" if normalized_folder else secure_filename
+        )
 
         physical_path = self._key_to_path(storage_key)
         if physical_path is None:
@@ -161,7 +163,9 @@ class LocalStorageProvider(StorageProvider):
         self._validate_file(file)
 
         try:
-            physical_path, web_url = await self._resolve_destination(file.filename or "file", folder)
+            physical_path, web_url = await self._resolve_destination(
+                file.filename or "file", folder
+            )
             async with aiofiles.open(physical_path, "wb") as buffer:
                 while chunk := await file.read(1024 * 1024):
                     await buffer.write(chunk)

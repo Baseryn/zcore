@@ -71,9 +71,7 @@ def _sanitize_error_item(err: dict[str, Any]) -> dict[str, Any]:
     ctx_info = err.get("ctx")
     if isinstance(ctx_info, dict):
         safe_ctx = {
-            k: str(v)
-            for k, v in ctx_info.items()
-            if isinstance(v, (str, int, float, bool))
+            k: str(v) for k, v in ctx_info.items() if isinstance(v, (str, int, float, bool))
         }
         if safe_ctx:
             sanitized["context"] = safe_ctx
@@ -81,9 +79,7 @@ def _sanitize_error_item(err: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-async def app_exception_handler(
-    request: Request, exc: AppException
-) -> ZCoreJSONResponse:
+async def app_exception_handler(request: Request, exc: AppException) -> ZCoreJSONResponse:
     """Handle custom domain-level `AppException` instances.
 
     Args:
@@ -228,9 +224,7 @@ async def response_validation_exception_handler(
     )
 
     message = (
-        "Internal server error: Response validation failed"
-        if is_debug
-        else "Internal server error"
+        "Internal server error: Response validation failed" if is_debug else "Internal server error"
     )
 
     meta: dict[str, Any] = {
@@ -253,9 +247,7 @@ async def response_validation_exception_handler(
     )
 
 
-async def unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> ZCoreJSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> ZCoreJSONResponse:
     """Catch-all fallback handler for uncaught runtime exceptions.
 
     Args:
@@ -275,9 +267,7 @@ async def unhandled_exception_handler(
         method=request.method,
     )
 
-    message = (
-        f"Internal server error: {exc!s}" if is_debug else "Internal server error"
-    )
+    message = f"Internal server error: {exc!s}" if is_debug else "Internal server error"
 
     meta: dict[str, Any] = {
         "error_type": type(exc).__name__,
@@ -319,17 +309,13 @@ def register_exception_handlers(
         app.add_exception_handler(AppException, app_exception_handler)
 
     if include_validation_exceptions:
-        app.add_exception_handler(
-            RequestValidationError, request_validation_exception_handler
-        )
+        app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
 
     if include_http_exceptions:
         app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 
     if include_response_validation_exceptions:
-        app.add_exception_handler(
-            ResponseValidationError, response_validation_exception_handler
-        )
+        app.add_exception_handler(ResponseValidationError, response_validation_exception_handler)
 
     if include_unhandled_exceptions:
         app.add_exception_handler(Exception, unhandled_exception_handler)

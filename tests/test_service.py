@@ -38,7 +38,9 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         model.name = model.name + "_GETHOOKED"
         return model
 
-    async def post_get_multi(self, models: Sequence[ServiceTestModel]) -> Sequence[ServiceTestModel]:
+    async def post_get_multi(
+        self, models: Sequence[ServiceTestModel]
+    ) -> Sequence[ServiceTestModel]:
         self.hooks_called.append("post_get_multi")
         for m in models:
             m.name = m.name + "_GETMULTIHOCKED"
@@ -65,7 +67,9 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         for m in models:
             m.name = m.name + "_BULKAUDITED"
 
-    async def pre_update(self, target: ServiceTestModel | Any, schema: ServiceTestUpdateSchema, partial: bool) -> dict[str, Any] | None:
+    async def pre_update(
+        self, target: ServiceTestModel | Any, schema: ServiceTestUpdateSchema, partial: bool
+    ) -> dict[str, Any] | None:
         self.hooks_called.append("pre_update")
         schema.name = "UPDATED_HOOK_" + schema.name
         return None
@@ -74,7 +78,9 @@ class HookTrackingService(BaseService[ServiceTestModel]):
         self.hooks_called.append("post_update")
         model.name = model.name + "_UPDATED"
 
-    async def pre_update_multi(self, data: dict[ServiceTestModel | Any, BaseModel], partial: bool) -> None:
+    async def pre_update_multi(
+        self, data: dict[ServiceTestModel | Any, BaseModel], partial: bool
+    ) -> None:
         self.hooks_called.append("pre_update_multi")
         for _k, v in data.items():
             v.name = "BULK_UPD_" + v.name
@@ -94,7 +100,9 @@ class HookTrackingService(BaseService[ServiceTestModel]):
     async def pre_delete_multi(self, ids: list[Any], force: bool = False) -> None:
         self.hooks_called.append(f"pre_delete_multi_force_{force}")
 
-    async def post_delete_multi(self, models: Sequence[ServiceTestModel], force: bool = False) -> None:
+    async def post_delete_multi(
+        self, models: Sequence[ServiceTestModel], force: bool = False
+    ) -> None:
         self.hooks_called.append(f"post_delete_multi_force_{force}")
         for m in models:
             m.name = m.name + "_BULKDELETED"
@@ -288,7 +296,9 @@ async def test_service_create_multi_hooks() -> None:
     mock_repo = AsyncMock()
     mock_repo.db = mock_db
 
-    async def fake_create_multi(schemas: list[BaseModel], refresh: bool = False) -> Sequence[ServiceTestModel]:
+    async def fake_create_multi(
+        schemas: list[BaseModel], refresh: bool = False
+    ) -> Sequence[ServiceTestModel]:
         return [ServiceTestModel(id=i, name=s.name) for i, s in enumerate(schemas, 1)]
 
     mock_repo.create_multi.side_effect = fake_create_multi
@@ -310,7 +320,9 @@ async def test_service_update_multi_hooks() -> None:
     mock_repo = AsyncMock()
     mock_repo.db = mock_db
 
-    async def fake_update_multi(data: dict[ServiceTestModel | Any, BaseModel], partial: bool = False, refresh: bool = False) -> Sequence[ServiceTestModel]:
+    async def fake_update_multi(
+        data: dict[ServiceTestModel | Any, BaseModel], partial: bool = False, refresh: bool = False
+    ) -> Sequence[ServiceTestModel]:
         return [ServiceTestModel(id=getattr(k, "id", k), name=v.name) for k, v in data.items()]
 
     mock_repo.update_multi.side_effect = fake_update_multi

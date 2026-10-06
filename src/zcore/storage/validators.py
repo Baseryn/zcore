@@ -85,8 +85,7 @@ class FileExtensionValidator(BaseStorageValidator):
             message: Custom validation warning. Defaults to None.
         """
         self.allowed_extensions = {
-            ext.lower() if ext.startswith(".") else f".{ext.lower()}"
-            for ext in allowed_extensions
+            ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in allowed_extensions
         }
         self.message = (
             message
@@ -173,8 +172,7 @@ class SafeMimeTypeValidator(BaseStorageValidator):
         """
         self.allowed_mimes = set(allowed_mimes)
         self.message = (
-            message
-            or "Uploaded file content is corrupted or its MIME-type is not allowed."
+            message or "Uploaded file content is corrupted or its MIME-type is not allowed."
         )
 
     def __call__(self, file: UploadFile) -> None:

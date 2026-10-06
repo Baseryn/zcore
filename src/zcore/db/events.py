@@ -44,6 +44,4 @@ async def dispatch_db_event(event_name: str, payload: Any) -> None:
     try:
         await _global_dispatcher.dispatch(event_name, payload)
     except Exception as e:
-        logger.error(
-            f"Failed to dispatch database event '{event_name}': {e}", exc_info=True
-        )
+        logger.error(f"Failed to dispatch database event '{event_name}': {e}", exc_info=True)

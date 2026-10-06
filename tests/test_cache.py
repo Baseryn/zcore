@@ -254,7 +254,9 @@ async def test_cache_double_init(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("redis_healthy", [True, False])
-async def test_base_cache_delete_fallback(monkeypatch: pytest.MonkeyPatch, redis_healthy: bool) -> None:
+async def test_base_cache_delete_fallback(
+    monkeypatch: pytest.MonkeyPatch, redis_healthy: bool
+) -> None:
     cache = BaseCache[str](prefix="del_test")
     await cache.set("k1", "v1")
 
@@ -309,7 +311,10 @@ async def test_close_cache_cancellation_suppression(monkeypatch: pytest.MonkeyPa
 
 
 def test_dynamic_cache_configuration_bindings() -> None:
-    with patch.object(settings, "CACHE_LOCAL_MAXSIZE", 42), patch.object(settings, "CACHE_DEFAULT_TTL", 123):
+    with (
+        patch.object(settings, "CACHE_LOCAL_MAXSIZE", 42),
+        patch.object(settings, "CACHE_DEFAULT_TTL", 123),
+    ):
         local_cache = TTLLRUCache()
         assert local_cache.maxsize == 42
 

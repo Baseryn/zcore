@@ -102,9 +102,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             ValueError: If the required service parameter is not configured.
         """
         if not self.service:
-            raise ValueError(
-                f"Service class must be defined in '{self.__class__.__name__}'."
-            )
+            raise ValueError(f"Service class must be defined in '{self.__class__.__name__}'.")
 
         self.router = APIRouter(
             prefix=self.prefix, tags=self.tags or [], route_class=self.route_class
@@ -337,9 +335,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             loader_options if loader_options else None,
         )
 
-    def _validate_lookup_request(
-        self, search_in: SearchRequest, allowed_fields: set[str]
-    ) -> None:
+    def _validate_lookup_request(self, search_in: SearchRequest, allowed_fields: set[str]) -> None:
         """Validate that incoming lookup filters and sorting parameters conform to allowed fields.
 
         Args:
@@ -572,9 +568,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
 
         self._sort_routes()
 
-    async def create_endpoint(
-        self, data_in: Any, service: BaseService
-    ) -> ResponseWrapper:
+    async def create_endpoint(self, data_in: Any, service: BaseService) -> ResponseWrapper:
         """Execute the POST creation transaction.
 
         Args:
@@ -587,9 +581,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         data = await service.create(data_in)
         return ResponseWrapper(data=data)
 
-    async def get_endpoint(
-        self, id: Any, service: BaseService
-    ) -> ResponseWrapper:
+    async def get_endpoint(self, id: Any, service: BaseService) -> ResponseWrapper:
         """Execute a single-record query lookup.
 
         Args:
@@ -640,20 +632,14 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             default_size = self.default_page_size or getattr(
                 settings, "PAGINATION_DEFAULT_SIZE", 20
             )
-            max_size = self.max_page_size or getattr(
-                settings, "PAGINATION_MAX_SIZE", 100
-            )
+            max_size = self.max_page_size or getattr(settings, "PAGINATION_MAX_SIZE", 100)
 
             effective_size = min(search_in.size or default_size, max_size)
 
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(
-                    cursor=search_in.cursor, size=effective_size
-                )
+                pagination = CursorParams(cursor=search_in.cursor, size=effective_size)
             else:
-                pagination = PageNumberParams(
-                    page=search_in.page, size=effective_size
-                )
+                pagination = PageNumberParams(page=search_in.page, size=effective_size)
 
         result = await service.search(search_in, pagination)
         from zcore.db.pagination import PaginatedResult
@@ -682,9 +668,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             or self.max_page_size
             or getattr(settings, "PAGINATION_MAX_SIZE", 100)
         )
-        default_limit = self.default_page_size or getattr(
-            settings, "PAGINATION_DEFAULT_SIZE", 20
-        )
+        default_limit = self.default_page_size or getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
 
         effective_size = min(search_in.size or default_limit, max_limit)
         search_in.size = effective_size
@@ -696,13 +680,9 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             from zcore.db.pagination import CursorParams, PageNumberParams
 
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(
-                    cursor=search_in.cursor, size=search_in.size
-                )
+                pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
             else:
-                pagination = PageNumberParams(
-                    page=search_in.page, size=search_in.size
-                )
+                pagination = PageNumberParams(page=search_in.page, size=search_in.size)
 
         result = await service.search(
             search_in,

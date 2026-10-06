@@ -38,7 +38,9 @@ def create_mock_upload_file(content: bytes, filename: str, size: int | None = No
         "..\\..\\",
     ],
 )
-async def test_storage_path_traversal_prevention(test_storage_dir: str, malicious_folder: str) -> None:
+async def test_storage_path_traversal_prevention(
+    test_storage_dir: str, malicious_folder: str
+) -> None:
     """Ensure path traversal attempts are blocked during upload and deletion."""
     provider = LocalStorageProvider(base_path=test_storage_dir)
     file = create_mock_upload_file(b"test data", "malicious.txt")
@@ -62,10 +64,28 @@ async def test_storage_path_traversal_prevention(test_storage_dir: str, maliciou
     "content, filename, allowed_mimes, should_pass, error_message",
     [
         (b"\xff\xd8\xff\xe0\x00\x10JFIF", "image.jpg", ["image/jpeg"], True, ""),
-        (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", "image.png", ["image/jpeg"], False, "MIME-type is not allowed"),
+        (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
+            "image.png",
+            ["image/jpeg"],
+            False,
+            "MIME-type is not allowed",
+        ),
         (b"<?php echo 'hello'; ?>", "test.jpg", ["image/jpeg"], False, "Security policy violation"),
-        (b"<script>alert(1)</script>", "evil.jpg", ["image/jpeg"], False, "Security policy violation"),
-        (b"MZ\x90\x00\x03\x00\x00\x00", "payload.jpg", ["image/jpeg"], False, "Security policy violation"),
+        (
+            b"<script>alert(1)</script>",
+            "evil.jpg",
+            ["image/jpeg"],
+            False,
+            "Security policy violation",
+        ),
+        (
+            b"MZ\x90\x00\x03\x00\x00\x00",
+            "payload.jpg",
+            ["image/jpeg"],
+            False,
+            "Security policy violation",
+        ),
         (b"#!/bin/sh\nrm -rf /", "exploit.jpg", ["image/jpeg"], False, "Security policy violation"),
     ],
 )
@@ -293,7 +313,9 @@ def test_validator_mime_read_error() -> None:
 
 
 @pytest.mark.anyio
-async def test_storage_os_permission_error(test_storage_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_storage_os_permission_error(
+    test_storage_dir: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify underlying OS write errors are cleanly caught and wrapped in AppException."""
     provider = LocalStorageProvider(base_path=test_storage_dir)
     file = create_mock_upload_file(b"test data", "permission.txt")

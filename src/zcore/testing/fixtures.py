@@ -80,8 +80,7 @@ class EventDispatcherSandbox(ZTestFixture):
 
         if self._dispatcher is not None:
             self._subscribers_snapshot = {
-                event: list(handlers)
-                for event, handlers in self._dispatcher._subscribers.items()
+                event: list(handlers) for event, handlers in self._dispatcher._subscribers.items()
             }
 
     async def tearDown(self) -> None:
