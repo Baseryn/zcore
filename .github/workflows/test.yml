@@ -36,6 +36,7 @@ jobs:
 
       - name: Mypy Strict Type Analysis
         run: mypy src/zcore
+
   matrix-tests:
     name: test (${{ matrix.os }} / py${{ matrix.python-version }})
     needs: quality-check
@@ -44,10 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
-        include:
-          - os: ubuntu-latest
-            python-version: "3.13"
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -64,13 +62,15 @@ jobs:
 
       - name: Run 515+ Tests via Hatch
         run: hatch test
+
   smoke-install-test:
     name: smoke test (${{ matrix.os }})
     needs: matrix-tests
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
