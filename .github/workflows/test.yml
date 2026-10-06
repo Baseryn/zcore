@@ -89,3 +89,19 @@ jobs:
           pip install dist/*.whl
           zc --version
           python -c "import zcore; print('ZCore successfully imported from:', zcore.__file__)"
+
+  all-checks-passed:
+    name: all-checks-passed
+    needs: [quality-check, matrix-tests, smoke-install-test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all dependencies succeeded
+        run: |
+          if [ "${{ needs.quality-check.result }}" != "success" ] || \
+             [ "${{ needs.matrix-tests.result }}" != "success" ] || \
+             [ "${{ needs.smoke-install-test.result }}" != "success" ]; then
+            echo "One or more checks failed!"
+            exit 1
+          fi
+          echo "All 13 checks passed with 100% success!"
