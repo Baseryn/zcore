@@ -19,17 +19,12 @@ from zcore.db.uow import UnitOfWork
     [
         ("sqlite+aiosqlite:///:memory:", 5, 10),
         ("sqlite+aiosqlite:///:memory:", 10, 20),
-    ]
+    ],
 )
 @pytest.mark.anyio
 async def test_db_manager_init(db_url: str, pool_size: int, max_overflow: int) -> None:
     manager = DatabaseManager()
-    manager.init_app(
-        db_url=db_url,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
-        echo=False
-    )
+    manager.init_app(db_url=db_url, pool_size=pool_size, max_overflow=max_overflow, echo=False)
 
     assert manager._engine is not None
     assert manager._session_factory is not None
@@ -43,7 +38,7 @@ async def test_db_manager_init(db_url: str, pool_size: int, max_overflow: int) -
         ValueError,
         RuntimeError,
         TypeError,
-    ]
+    ],
 )
 @pytest.mark.anyio
 async def test_db_session_rollback_on_error(exception_class: type[Exception]) -> None:
@@ -70,13 +65,15 @@ async def test_db_session_rollback_on_error(exception_class: type[Exception]) ->
         [("user.created", {"id": str(uuid.uuid4())})],
         [
             ("order.created", {"id": str(uuid.uuid4())}),
-            ("inventory.decremented", {"sku": "SKU-123", "qty": 1})
+            ("inventory.decremented", {"sku": "SKU-123", "qty": 1}),
         ],
-        []
-    ]
+        [],
+    ],
 )
 @pytest.mark.anyio
-async def test_uow_commit_emits_events(events_to_register: list[tuple[str, dict[str, Any]]]) -> None:
+async def test_uow_commit_emits_events(
+    events_to_register: list[tuple[str, dict[str, Any]]],
+) -> None:
     session = AsyncMock()
     dispatcher = AsyncMock()
     uow = UnitOfWork(session, dispatcher)
@@ -111,12 +108,11 @@ async def test_uow_commit_emits_events(events_to_register: list[tuple[str, dict[
     [
         (ValueError, [("payment.failed", {"amount": 100})]),
         (RuntimeError, [("log.error", {"msg": "failure"}), ("alert.sent", {})]),
-    ]
+    ],
 )
 @pytest.mark.anyio
 async def test_uow_rollback_clears_events(
-    exception_class: type[Exception],
-    events_to_register: list[tuple[str, dict[str, Any]]]
+    exception_class: type[Exception], events_to_register: list[tuple[str, dict[str, Any]]]
 ) -> None:
     session = AsyncMock()
     session.info = {}
@@ -151,18 +147,20 @@ async def test_db_manager_uninitialized_access() -> None:
 
 
 @pytest.mark.anyio
-async def test_db_manager_sql_logger_timing() -> None:
+async def test_db_manager_sql_logger_timing(monkeypatch: pytest.MonkeyPatch) -> None:
     listeners = {}
 
     def mock_listens_for(target, identifier):
         def decorator(fn):
             listeners[identifier] = fn
             return fn
+
         return decorator
 
-    with patch("sqlalchemy.event.listens_for", mock_listens_for), \
-         patch("structlog.get_logger") as mock_get_logger:
-
+    with (
+        patch("sqlalchemy.event.listens_for", mock_listens_for),
+        patch("structlog.get_logger") as mock_get_logger,
+    ):
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -175,6 +173,8 @@ async def test_db_manager_sql_logger_timing() -> None:
         assert "before_cursor_execute" in listeners
         assert "after_cursor_execute" in listeners
 
+        monkeypatch.setattr(settings.LOGGING, "log_sql_queries", True)
+
         mock_context = MagicMock()
         listeners["before_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
         assert hasattr(mock_context, "_query_start_time")
@@ -183,7 +183,9 @@ async def test_db_manager_sql_logger_timing() -> None:
         mock_logger.info.assert_called_once()
 
         mock_logger.reset_mock()
-        listeners["after_cursor_execute"](None, None, "SELECT * FROM pg_catalog.pg_tables", {}, mock_context, False)
+        listeners["after_cursor_execute"](
+            None, None, "SELECT * FROM pg_catalog.pg_tables", {}, mock_context, False
+        )
         mock_logger.info.assert_not_called()
 
 
@@ -327,10 +329,13 @@ def test_sql_query_logger_suppression_when_disabled(monkeypatch: pytest.MonkeyPa
         def decorator(fn: Any) -> Any:
             listeners[identifier] = fn
             return fn
+
         return decorator
 
-    with patch("sqlalchemy.event.listens_for", mock_listens_for), \
-         patch("structlog.get_logger") as mock_get_logger:
+    with (
+        patch("sqlalchemy.event.listens_for", mock_listens_for),
+        patch("structlog.get_logger") as mock_get_logger,
+    ):
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 
@@ -343,6 +348,7 @@ def test_sql_query_logger_suppression_when_disabled(monkeypatch: pytest.MonkeyPa
         listeners["before_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
 
         monkeypatch.setattr(settings.LOGGING, "log_sql_queries", False)
+        monkeypatch.setattr(settings.LOGGING, "slow_query_threshold_ms", None)
         listeners["after_cursor_execute"](None, None, "SELECT 1", {}, mock_context, False)
         mock_logger.info.assert_not_called()
 
@@ -354,10 +360,13 @@ def test_sql_query_logger_slow_query_threshold(monkeypatch: pytest.MonkeyPatch) 
         def decorator(fn: Any) -> Any:
             listeners[identifier] = fn
             return fn
+
         return decorator
 
-    with patch("sqlalchemy.event.listens_for", mock_listens_for), \
-         patch("structlog.get_logger") as mock_get_logger:
+    with (
+        patch("sqlalchemy.event.listens_for", mock_listens_for),
+        patch("structlog.get_logger") as mock_get_logger,
+    ):
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
 

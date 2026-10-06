@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import load_only
 
 from zcore.context.context import ctx
 from zcore.db.pagination import CursorParams, PageNumberParams
@@ -59,7 +60,7 @@ async def setup_test_tables(test_engine: Any) -> AsyncGenerator[None, None]:
     [
         ("Test Item 1", "Description 1"),
         ("Test Item 2", None),
-    ]
+    ],
 )
 async def test_repo_create_and_get(db_session: Any, name: str, description: str | None) -> None:
     repo = RepoTestRepository(db_session)
@@ -83,16 +84,16 @@ async def test_repo_create_and_get(db_session: Any, name: str, description: str 
         (
             [
                 RepoTestCreateSchema(name="Item A", description="Desc A"),
-                RepoTestCreateSchema(name="Item B", description="Desc B")
+                RepoTestCreateSchema(name="Item B", description="Desc B"),
             ],
-            True
+            True,
         ),
-    ]
+    ],
 )
 async def test_repo_create_multi_empty_and_filled(
     db_session: Any,
     schemas: list[RepoTestCreateSchema],
-    expect_db_hit: bool
+    expect_db_hit: bool,
 ) -> None:
     repo = RepoTestRepository(db_session)
 
@@ -117,11 +118,15 @@ async def test_repo_create_multi_empty_and_filled(
     [
         (True, "Original Desc"),
         (False, None),
-    ]
+    ],
 )
-async def test_repo_partial_update(db_session: Any, partial: bool, expected_desc: str | None) -> None:
+async def test_repo_partial_update(
+    db_session: Any, partial: bool, expected_desc: str | None
+) -> None:
     repo = RepoTestRepository(db_session)
-    created = await repo.create(RepoTestCreateSchema(name="Original Name", description="Original Desc"))
+    created = await repo.create(
+        RepoTestCreateSchema(name="Original Name", description="Original Desc")
+    )
 
     update_schema = RepoTestUpdateSchema(name="Updated Name")
     updated = await repo.update(created.id, update_schema, partial=partial)
@@ -136,7 +141,7 @@ async def test_repo_partial_update(db_session: Any, partial: bool, expected_desc
     "non_existent_id",
     [
         99999,
-    ]
+    ],
 )
 async def test_repo_delete_multi(db_session: Any, non_existent_id: int) -> None:
     repo = RepoTestRepository(db_session)
@@ -226,7 +231,7 @@ async def test_repo_create_multi_no_refresh(db_session: Any) -> None:
     repo = RepoTestRepository(db_session)
     schemas = [
         RepoTestCreateSchema(name="NR1"),
-        RepoTestCreateSchema(name="NR2")
+        RepoTestCreateSchema(name="NR2"),
     ]
     results = await repo.create_multi(schemas, refresh=False)
     assert len(results) == 2
@@ -262,10 +267,8 @@ async def test_repo_page_number_sorting_validation(db_session: Any) -> None:
 @pytest.mark.anyio
 async def test_repo_cursor_pagination(db_session: Any) -> None:
     repo = RepoTestRepository(db_session)
-    items = []
     for i in range(5):
-        item = await repo.create(RepoTestCreateSchema(name=f"C_{i}"))
-        items.append(item)
+        await repo.create(RepoTestCreateSchema(name=f"C_{i}"))
 
     params1 = CursorParams(size=2)
     res1 = await repo.get_list(pagination=params1)
@@ -306,8 +309,8 @@ async def test_repo_search_engine_complex(db_session: Any) -> None:
                 op="and",
                 items=[
                     FilterItem(field="description", op="eq", value="Fruit"),
-                    FilterItem(field="name", op="ilike", value="ba")
-                ]
+                    FilterItem(field="name", op="ilike", value="ba"),
+                ],
             )
         ]
     )
@@ -317,21 +320,34 @@ async def test_repo_search_engine_complex(db_session: Any) -> None:
 
 
 @pytest.mark.anyio
+async def test_repo_search_with_fields_and_options(db_session: Any) -> None:
+    repo = RepoTestRepository(db_session)
+    await repo.create(RepoTestCreateSchema(name="LookupItem1", description="DeepDescription1"))
+    await repo.create(RepoTestCreateSchema(name="LookupItem2", description="DeepDescription2"))
+
+    req = SearchRequest(filters=[FilterItem(field="name", op="startswith", value="Lookup")])
+    res = await repo.search(
+        req, fields=[RepoTestModel.id, RepoTestModel.name], options=[load_only(RepoTestModel.name)]
+    )
+    assert len(res) == 2
+    assert res[0].name == "LookupItem1"
+    assert res[1].name == "LookupItem2"
+
+
+@pytest.mark.anyio
 async def test_repo_search_security_violation(db_session: Any) -> None:
     repo = RepoTestRepository(db_session)
 
     token = ctx.initialize()
-    table_suffix = RepoTestModel.__tablename__.split('_')[-1]
-    ctx.restricted_fields = frozenset([
-        "description",
-        f"repo_test_model_{table_suffix}.description"
-    ])
-
-    req = SearchRequest(
-        filters=[
-            FilterItem(field="description", op="eq", value="Fruit")
+    table_suffix = RepoTestModel.__tablename__.split("_")[-1]
+    ctx.restricted_fields = frozenset(
+        [
+            "description",
+            f"repo_test_model_{table_suffix}.description",
         ]
     )
+
+    req = SearchRequest(filters=[FilterItem(field="description", op="eq", value="Fruit")])
 
     try:
         with pytest.raises(ForbiddenError):

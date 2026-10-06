@@ -28,6 +28,7 @@ class MockSessionContext:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         pass
 
+
 class MockRedisPubSub:
     def __init__(self, queue: asyncio.Queue) -> None:
         self.queue = queue
@@ -45,6 +46,7 @@ class MockRedisPubSub:
 
     async def close(self) -> None:
         pass
+
 
 class MockRedis:
     def __init__(self) -> None:
@@ -64,26 +66,26 @@ class MockRedis:
         return MockRedisPubSub(self.pubsub_queue)
 
     async def publish(self, channel: str, message: str) -> None:
-        await self.pubsub_queue.put({
-            "type": "pmessage",
-            "channel": channel,
-            "data": message
-        })
+        await self.pubsub_queue.put({"type": "pmessage", "channel": channel, "data": message})
 
     async def close(self) -> None:
         pass
+
 
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
     return "asyncio"
 
+
 @pytest.fixture(scope="session")
 def test_storage_dir() -> str:
     return os.getenv("TEST_STORAGE_PATH", "./test_storage")
 
+
 @pytest.fixture(scope="session")
 def test_db_url() -> str:
     return os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def clean_test_storage(test_storage_dir: str) -> Generator[None, None, None]:
@@ -92,6 +94,7 @@ def clean_test_storage(test_storage_dir: str) -> Generator[None, None, None]:
     yield
     if os.path.exists(test_storage_dir):
         shutil.rmtree(test_storage_dir)
+
 
 @pytest_asyncio.fixture
 async def test_engine(test_db_url: str) -> AsyncGenerator[AsyncEngine, None]:
@@ -105,20 +108,20 @@ async def test_engine(test_db_url: str) -> AsyncGenerator[AsyncEngine, None]:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
+
 @pytest_asyncio.fixture
 async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     async with test_engine.connect() as conn:
         transaction = await conn.begin()
         session = AsyncSession(
-            bind=conn,
-            expire_on_commit=False,
-            join_transaction_mode="create_savepoint"
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
         )
         original_session_method = db_manager.session
         db_manager.session = lambda: MockSessionContext(session)
         yield session
         await transaction.rollback()
         db_manager.session = original_session_method
+
 
 @pytest.fixture(autouse=True)
 def reset_di_container(test_db_url: str, test_storage_dir: str) -> Generator[None, None, None]:
@@ -131,10 +134,11 @@ def reset_di_container(test_db_url: str, test_storage_dir: str) -> Generator[Non
     test_settings = Settings(
         DATABASE_URL=test_db_url,
         SECRET_KEY=os.getenv("TEST_SECRET_KEY", "test-secret-key-12345678901234567890123456789012"),
-        STORAGE_PATH=test_storage_dir
+        STORAGE_PATH=test_storage_dir,
     )
     initialize_settings(test_settings)
     yield
+
 
 @pytest.fixture(autouse=True)
 def mock_redis(monkeypatch: pytest.MonkeyPatch) -> Generator[MockRedis, None, None]:
@@ -142,6 +146,7 @@ def mock_redis(monkeypatch: pytest.MonkeyPatch) -> Generator[MockRedis, None, No
     monkeypatch.setattr("zcore.cache.base._shared_redis_client", mock_client)
     monkeypatch.setattr("zcore.web.streams._stream_redis_client", mock_client)
     yield mock_client
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_background_tasks() -> AsyncGenerator[None, None]:
@@ -155,16 +160,20 @@ async def cleanup_background_tasks() -> AsyncGenerator[None, None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
+
 @pytest_asyncio.fixture
 async def test_app(db_session: AsyncSession) -> AsyncGenerator[FastAPI, None]:
     app = FastAPI()
     kernel = Kernel()
     kernel.setup(app)
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
+
     app.dependency_overrides[get_db] = override_get_db
     yield app
     app.dependency_overrides.clear()
+
 
 @pytest_asyncio.fixture
 async def async_client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:

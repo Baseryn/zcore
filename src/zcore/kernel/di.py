@@ -15,6 +15,7 @@ from contextvars import ContextVar
 from typing import (
     Annotated,
     Any,
+    Generic,
     TypeVar,
     get_args,
     get_origin,
@@ -30,8 +31,8 @@ logger = structlog.get_logger()
 T = TypeVar("T")
 
 _current_scope_id: ContextVar[str | None] = ContextVar("scope_id", default=None)
-_scoped_instances: ContextVar[dict[type[Any], Any]] = ContextVar(
-    "scoped_instances", default={}
+_scoped_instances: ContextVar[dict[type[Any], Any] | None] = ContextVar(
+    "scoped_instances", default=None
 )
 
 
@@ -105,19 +106,13 @@ class IoCContainer:
             DIException: If registered outside of an active scope boundary.
         """
         scope_id = _current_scope_id.get()
-        if scope_id:
-            current_instances = _scoped_instances.get()
-            new_instances = dict(current_instances)
-            new_instances[interface] = instance
-            _scoped_instances.set(new_instances)
+        current_instances = _scoped_instances.get()
+        if scope_id is not None and current_instances is not None:
+            current_instances[interface] = instance
         else:
-            raise DIException(
-                "Cannot register scoped instance outside of an active scope."
-            )
+            raise DIException("Cannot register scoped instance outside of an active scope.")
 
-    def register_transient(
-        self, interface: type[Any], implementation: type[Any]
-    ) -> None:
+    def register_transient(self, interface: type[Any], implementation: type[Any]) -> None:
         """Register a class bound to a transient lifecycle.
 
         Transient classes are constructed as a new instance on every resolution request.
@@ -126,9 +121,7 @@ class IoCContainer:
             interface: The interface or class type key to map against.
             implementation: The target implementation class to instantiate.
         """
-        self._factories[interface] = lambda stack=None: self._auto_wire(
-            implementation, stack
-        )
+        self._factories[interface] = lambda stack=None: self._auto_wire(implementation, stack)
 
     def resolve(self, interface: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Resolve a specific interface or type dependency.
@@ -151,16 +144,15 @@ class IoCContainer:
             return self._singletons[interface]
 
         scope_id = _current_scope_id.get()
-        if scope_id:
+        if scope_id is not None:
             current_instances = _scoped_instances.get()
-            if interface in current_instances:
+            if current_instances is not None and interface in current_instances:
                 return current_instances[interface]
 
             if interface in self._scoped_definitions:
                 resolved_instance = self._scoped_definitions[interface](_stack)
-                new_instances = dict(current_instances)
-                new_instances[interface] = resolved_instance
-                _scoped_instances.set(new_instances)
+                if current_instances is not None:
+                    current_instances[interface] = resolved_instance
                 return resolved_instance
 
         if interface in self._factories:
@@ -168,9 +160,7 @@ class IoCContainer:
 
         return self._auto_wire(interface, _stack)
 
-    def _auto_wire(
-        self, target_class: type[T], _stack: set[type[Any]] | None = None
-    ) -> T:
+    def _auto_wire(self, target_class: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Analyze, resolve parameters, and construct a class instance.
 
         Leverages constructor cache values and metadata reflection to construct targets.
@@ -192,10 +182,7 @@ class IoCContainer:
 
         _stack = _stack or set()
         if target_class in _stack:
-            chain = (
-                " -> ".join([c.__name__ for c in _stack])
-                + f" -> {target_class.__name__}"
-            )
+            chain = " -> ".join([c.__name__ for c in _stack]) + f" -> {target_class.__name__}"
             raise CircularDependencyError(f"Circular dependency detected: {chain}")
 
         _stack.add(target_class)
@@ -203,9 +190,7 @@ class IoCContainer:
         try:
             if target_class in self._dependency_signature_cache:
                 dependencies = self._dependency_signature_cache[target_class]
-                resolved_args = [
-                    self.resolve(dep, _stack.copy()) for dep in dependencies
-                ]
+                resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
                 return target_class(*resolved_args)
 
             if target_class not in self._constructor_cache:
@@ -246,13 +231,15 @@ class IoCContainer:
         finally:
             _stack.remove(target_class)
 
-    def clear_scope(self, scope_id: str) -> None:
+    def clear_scope(self, scope_id: str | None = None) -> None:
         """Explicit scope cleanup hook.
 
         Args:
             scope_id: The string identifier of the scope to purge.
         """
-        _scoped_instances.set({})
+        current_instances = _scoped_instances.get()
+        if current_instances is not None:
+            current_instances.clear()
 
 
 container = IoCContainer()
@@ -282,7 +269,7 @@ class Injector:
         return container.resolve(self.interface)
 
 
-class Inject:
+class Inject(Generic[T]):
     """Dynamic type marker supporting unified Annotated dependency injection.
 
     Allows type annotations in FastAPI routers, e.g., `service: Inject[UserService]`.
@@ -314,7 +301,7 @@ async def background_scope(
 
     Args:
         inherit_context: If True, clones active request context parameters into the background scope.
-        **custom_context: Explicit key-value pairs to set or override in the background context store.
+        **custom_context: Explicit key-value parameters to set or override in the background context store.
 
     Yields:
         None within an active, isolated execution scope.
@@ -324,19 +311,31 @@ async def background_scope(
 
     scope_id = str(uuid.uuid4())
     scope_token = _current_scope_id.set(scope_id)
+    instances_token = _scoped_instances.set({})
 
     initial_store = dict(_request_context_store.get()) if inherit_context else {}
     initial_store.update(custom_context)
     ctx_token = _request_context_store.set(initial_store)
 
+    prev_structlog_context = structlog.contextvars.get_contextvars()
+    if not inherit_context:
+        structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=scope_id)
+
     try:
-        async with db_manager.session() as session:
-            container.register_scoped_instance(AsyncSession, session)
+        if getattr(db_manager, "_session_factory", None) is not None:
+            async with db_manager.session() as session:
+                container.register_scoped_instance(AsyncSession, session)
+                yield
+        else:
             yield
     finally:
-        container.clear_scope(scope_id)
+        _scoped_instances.reset(instances_token)
         _current_scope_id.reset(scope_token)
         _request_context_store.reset(ctx_token)
+        structlog.contextvars.clear_contextvars()
+        if prev_structlog_context:
+            structlog.contextvars.bind_contextvars(**prev_structlog_context)
 
 
 def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -405,8 +404,6 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
             _warn_if_closed_session_passed(args, kwargs)
             async with background_scope():
                 final_kwargs = _resolve_injections(args, kwargs)
-                return await to_thread.run_sync(
-                    functools.partial(func, *args, **final_kwargs)
-                )
+                return await to_thread.run_sync(functools.partial(func, *args, **final_kwargs))
 
         return sync_wrapper

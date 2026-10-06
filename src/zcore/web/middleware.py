@@ -1,9 +1,9 @@
 """Web Middleware Implementations.
 
 This module provides ASGI middleware to coordinate request lifecycles. It includes
-`RequestLogMiddleware` to trace execution durations, status codes, and request correlation headers,
-and `ScopedDependencyMiddleware` to manage the lifecycle of request-scoped dependency injection
-container boundaries and asynchronous database sessions.
+`RequestLogMiddleware` to trace execution durations, status codes, and request correlation headers
+with non-intrusive logging levels, and `ScopedDependencyMiddleware` to manage the lifecycle of
+request-scoped dependency injection container boundaries and asynchronous database sessions.
 """
 
 import re
@@ -15,20 +15,21 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from zcore.config import settings
 from zcore.context.context import ctx
 from zcore.db.setup import db_manager
-from zcore.kernel.di import _current_scope_id, container
+from zcore.kernel.di import _current_scope_id, _scoped_instances, container
 
 log = structlog.get_logger()
 REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-\.\_\:]{8,64}$")
 
 
 class RequestLogMiddleware:
-    """ASGI middleware to manage request correlation IDs and log HTTP transaction metrics.
+    """ASGI middleware to manage request correlation IDs and non-intrusive transaction metrics.
 
     Intercepts HTTP requests, extracts or generates correlation IDs, binds them to
     structured logging contextvars, appends the correlation ID to response headers,
-    and logs request metrics including method, path, status code, client IP, and duration.
+    and logs request metrics conditionally without duplicating standard ASGI server access logs.
 
     Attributes:
         app: The downstream ASGI application instance.
@@ -38,17 +39,17 @@ class RequestLogMiddleware:
         """Initialize the RequestLogMiddleware.
 
         Args:
-            app: The downstream ASGI application instance.
+            app: The downstream ASGI application instance to wrap.
         """
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Process an ASGI request.
+        """Process an incoming ASGI HTTP connection.
 
         Args:
-            scope: The ASGI connection scope.
-            receive: The ASGI channel to receive incoming events.
-            send: The ASGI channel to transmit outgoing events.
+            scope: The ASGI connection scope dictionary.
+            receive: The ASGI channel callable to receive incoming client events.
+            send: The ASGI channel callable to transmit outgoing server events.
         """
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -64,9 +65,7 @@ class RequestLogMiddleware:
                 break
 
         request_id_str = (
-            raw_request_id.decode("utf-8", errors="ignore").strip()
-            if raw_request_id
-            else ""
+            raw_request_id.decode("utf-8", errors="ignore").strip() if raw_request_id else ""
         )
 
         if request_id_str and REQUEST_ID_PATTERN.match(request_id_str):
@@ -78,11 +77,11 @@ class RequestLogMiddleware:
 
         status_code = 500
 
-        async def send_wrapper(message: dict[str, Any]) -> None:
-            """Intercept response start, capture status code, and append correlation header.
+        async def send_wrapper(message: Any) -> None:
+            """Intercept response start event, capture HTTP status code, and inject correlation headers.
 
             Args:
-                message: The outgoing ASGI event dictionary.
+                message: The outgoing ASGI event dictionary payload.
             """
             nonlocal status_code
             if message["type"] == "http.response.start":
@@ -99,14 +98,32 @@ class RequestLogMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
             duration = (time.perf_counter() - s_time) * 1000
-            log.info(
-                "http_request",
-                method=scope.get("method"),
-                path=scope.get("path"),
-                status_code=status_code,
-                client_ip=client_ip,
-                duration_ms=round(duration, 2),
+
+            logging_cfg = getattr(settings, "LOGGING", None)
+            json_fmt = getattr(logging_cfg, "json_format", None) if logging_cfg else None
+            is_json_mode = (
+                json_fmt if json_fmt is not None else (getattr(settings, "DEBUG", False) is False)
             )
+            should_log_metrics = (getattr(settings, "DEBUG", False) is False) and is_json_mode
+
+            if should_log_metrics:
+                log.info(
+                    "http_request",
+                    method=scope.get("method"),
+                    path=scope.get("path"),
+                    status_code=status_code,
+                    client_ip=client_ip,
+                    duration_ms=round(duration, 2),
+                )
+            else:
+                log.debug(
+                    "http_request",
+                    method=scope.get("method"),
+                    path=scope.get("path"),
+                    status_code=status_code,
+                    client_ip=client_ip,
+                    duration_ms=round(duration, 2),
+                )
         except Exception:
             duration = (time.perf_counter() - s_time) * 1000
             log.exception(
@@ -137,29 +154,33 @@ class ScopedDependencyMiddleware:
         """Initialize the ScopedDependencyMiddleware.
 
         Args:
-            app: The downstream ASGI application instance.
+            app: The downstream ASGI application instance to wrap.
         """
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Process an ASGI request.
+        """Process an incoming ASGI connection within an isolated IoC and database scope.
 
         Args:
-            scope: The ASGI connection scope.
-            receive: The ASGI channel to receive incoming events.
-            send: The ASGI channel to transmit outgoing events.
+            scope: The ASGI connection scope dictionary.
+            receive: The ASGI channel callable to receive incoming client events.
+            send: The ASGI channel callable to transmit outgoing server events.
         """
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         scope_id = str(uuid.uuid4())
-        token = _current_scope_id.set(scope_id)
+        scope_token = _current_scope_id.set(scope_id)
+        instances_token = _scoped_instances.set({})
 
         try:
-            async with db_manager.session() as session:
-                container.register_scoped_instance(AsyncSession, session)
+            if getattr(db_manager, "_session_factory", None) is not None:
+                async with db_manager.session() as session:
+                    container.register_scoped_instance(AsyncSession, session)
+                    await self.app(scope, receive, send)
+            else:
                 await self.app(scope, receive, send)
         finally:
-            container.clear_scope(scope_id)
-            _current_scope_id.reset(token)
+            _scoped_instances.reset(instances_token)
+            _current_scope_id.reset(scope_token)

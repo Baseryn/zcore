@@ -11,11 +11,7 @@ from zcore.kernel.events import EventDispatcher
 
 class TrackedPlugin:
     def __init__(
-        self,
-        name: str,
-        dependencies: list[str],
-        log: list[str],
-        fail_phase: str | None = None
+        self, name: str, dependencies: list[str], log: list[str], fail_phase: str | None = None
     ) -> None:
         self.name = name
         self.version = f"1.0.{uuid.uuid4().hex[:4]}"
@@ -54,7 +50,7 @@ class TrackedPlugin:
     [
         {"C": ["B"], "B": ["A"], "A": []},
         {"D": ["B", "C"], "C": ["A"], "B": ["A"], "A": []},
-    ]
+    ],
 )
 def test_topological_sort_order(graph: dict[str, list[str]]) -> None:
     kernel = Kernel()
@@ -76,7 +72,7 @@ def test_topological_sort_order(graph: dict[str, list[str]]) -> None:
     [
         {"A": ["B"], "B": ["A"]},
         {"A": ["B"], "B": ["C"], "C": ["A"]},
-    ]
+    ],
 )
 def test_cycle_dependency_error(graph: dict[str, list[str]]) -> None:
     kernel = Kernel()
@@ -94,7 +90,7 @@ def test_cycle_dependency_error(graph: dict[str, list[str]]) -> None:
     [
         {"A": ["B"]},
         {"A": ["B"], "B": ["C"]},
-    ]
+    ],
 )
 def test_missing_dependency_error(graph: dict[str, list[str]]) -> None:
     kernel = Kernel()
@@ -112,7 +108,7 @@ def test_missing_dependency_error(graph: dict[str, list[str]]) -> None:
     "graph",
     [
         {"C": ["B"], "B": ["A"], "A": []},
-    ]
+    ],
 )
 async def test_plugin_lifespan_lifecycle(graph: dict[str, list[str]]) -> None:
     kernel = Kernel()
@@ -129,15 +125,19 @@ async def test_plugin_lifespan_lifecycle(graph: dict[str, list[str]]) -> None:
 
     async with kernel.lifespan(app):
         assert log == [
-            "A:before_startup", "B:before_startup", "C:before_startup",
-            "A:on_startup", "B:on_startup", "C:on_startup",
-            "A:after_startup", "B:after_startup", "C:after_startup",
+            "A:before_startup",
+            "B:before_startup",
+            "C:before_startup",
+            "A:on_startup",
+            "B:on_startup",
+            "C:on_startup",
+            "A:after_startup",
+            "B:after_startup",
+            "C:after_startup",
         ]
         log.clear()
 
-    assert log == [
-        "C:on_shutdown", "B:on_shutdown", "A:on_shutdown"
-    ]
+    assert log == ["C:on_shutdown", "B:on_shutdown", "A:on_shutdown"]
 
 
 @pytest.mark.anyio
@@ -307,9 +307,10 @@ async def test_kernel_lifespan_closes_db_and_cache_on_shutdown() -> None:
     app = FastAPI()
     kernel.setup(app)
 
-    with patch("zcore.cache.base.close_cache", new_callable=AsyncMock) as mock_close_cache, \
-         patch("zcore.db.setup.db_manager.close", new_callable=AsyncMock) as mock_db_close:
-
+    with (
+        patch("zcore.cache.base.close_cache", new_callable=AsyncMock) as mock_close_cache,
+        patch("zcore.db.setup.db_manager.close", new_callable=AsyncMock) as mock_db_close,
+    ):
         async with kernel.lifespan(app):
             mock_close_cache.assert_not_called()
             mock_db_close.assert_not_called()

@@ -100,9 +100,7 @@ def format_iso_with_app_timezone(dt: datetime | None) -> str | None:
 
 ZDateTime = Annotated[
     datetime,
-    PlainSerializer(
-        format_iso_with_app_timezone, return_type=str, when_used="json"
-    ),
+    PlainSerializer(format_iso_with_app_timezone, return_type=str, when_used="json"),
 ]
 
 __all__ = [

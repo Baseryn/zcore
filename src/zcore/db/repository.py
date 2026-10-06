@@ -3,7 +3,7 @@
 This module provides a Repository pattern implementation for SQLAlchemy
 2.0 and Pydantic V2. It decouples business logic from database interactions by exposing
 highly specialized, reusable interfaces divided into read, write, and search capabilities.
-It supports dynamic pagination, eager load optimization, and field pruning.
+It supports dynamic pagination, eager load optimization, field pruning, and full soft-delete lifecycles.
 """
 
 from collections.abc import Sequence
@@ -17,6 +17,7 @@ from sqlalchemy.orm.interfaces import ExecutableOption
 
 from zcore.db.pagination import CursorPagination, CursorParams, PageNumberPagination
 from zcore.db.setup import Base
+from zcore.utils.timezone import now
 
 if TYPE_CHECKING:
     from zcore.db.search import SearchRequest
@@ -47,7 +48,7 @@ class AbstractRepository(Generic[ModelType]):
     def _get_base_query(self) -> Select:
         """Construct the initial select statement for query operations.
 
-        Enforces context security by dynamically executing 'scope_query'
+        Enforces context security and soft-delete scoping by dynamically executing 'scope_query'
         if defined on the model layer.
 
         Returns:
@@ -75,6 +76,14 @@ class AbstractRepository(Generic[ModelType]):
         if filters:
             query = query.filter_by(**filters)
         return query
+
+    def _supports_soft_delete(self) -> bool:
+        """Determine whether the underlying model supports soft deletion.
+
+        Returns:
+            True if the model implements soft-delete capabilities, False otherwise.
+        """
+        return hasattr(self.model, "deleted_at") and hasattr(self.model, "soft_delete")
 
 
 class ReadRepositoryMixin(AbstractRepository[ModelType]):
@@ -125,11 +134,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
         result = await self.db.execute(query)
         return result.scalars().first()
 
@@ -156,11 +161,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
         result = await self.db.execute(query)
         return result.scalars().all()
 
@@ -189,11 +190,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if fields:
             query = query.options(load_only(*fields))
         if options:
-            query = (
-                query.options(*options)
-                if isinstance(options, list)
-                else query.options(options)
-            )
+            query = query.options(*options) if isinstance(options, list) else query.options(options)
 
         if pagination is None:
             result = await self.db.execute(query)
@@ -225,7 +222,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
 
 
 class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
-    """Mixin implementing data modification and persistence operations."""
+    """Mixin implementing data modification, persistence, and deletion lifecycles."""
 
     async def create(self, schema: BaseModel, **extra_data: Any) -> ModelType:
         """Create a new database record from a validated creation schema and dynamic fields.
@@ -284,7 +281,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             return records
 
     async def update(
-        self, target: ModelType | Any, schema: BaseModel, partial: bool = False, **extra_data: Any,
+        self,
+        target: ModelType | Any,
+        schema: BaseModel,
+        partial: bool = False,
+        **extra_data: Any,
     ) -> ModelType | None:
         """Update an existing database record from a model instance or primary key.
 
@@ -314,7 +315,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def update_multi(
-        self, data: dict[ModelType | Any, BaseModel], partial: bool = False, refresh: bool = False,
+        self,
+        data: dict[ModelType | Any, BaseModel],
+        partial: bool = False,
+        refresh: bool = False,
     ) -> Sequence[ModelType]:
         """Bulk update multiple database records using DBAPI executemany.
 
@@ -349,34 +353,48 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         return await self.get_by_ids(ids=target_ids)
 
-    async def delete(self, target: ModelType | Any) -> ModelType | None:
-        """Delete a single record by its model instance or primary key identifier.
+    async def delete(self, target: ModelType | Any, force: bool = False) -> ModelType | None:
+        """Delete a single record, applying soft deletion if supported unless forced.
 
         Args:
-            target: The model instance or primary key value of the target record to delete.
+            target: The model instance or primary key identifier of the record to delete.
+            force: If True, executes a permanent physical hard deletion. Defaults to False.
 
         Returns:
-            The deleted database model instance, or None if the record was not found.
+            The deleted or soft-deleted database model instance, or None if not found.
         """
         if isinstance(target, self.model):
             record = target
         else:
-            record = await self.get(**{self.pk_name: target})
+            if force:
+                query = select(self.model).where(getattr(self.model, self.pk_name) == target)
+                result = await self.db.execute(query)
+                record = result.scalars().first()
+            else:
+                record = await self.get(**{self.pk_name: target})
+
             if not record:
                 return None
+
+        if not force and self._supports_soft_delete():
+            record.soft_delete()
+            await self.db.flush()
+            await self.db.refresh(record)
+            return record
 
         await self.db.delete(record)
         await self.db.flush()
         return record
 
-    async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
-        """Delete multiple records matching the provided list of primary keys with dialect-aware fallback.
+    async def delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
+        """Delete multiple records by primary keys, using atomic soft update or hard delete.
 
         Args:
             ids: A list of primary key values of records to delete.
+            force: If True, executes permanent physical hard deletions. Defaults to False.
 
         Returns:
-            A sequence containing the deleted database model instances.
+            A sequence containing the deleted or soft-deleted database model instances.
         """
         if not ids:
             return []
@@ -384,29 +402,119 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
         supports_returning = bool(getattr(dialect, "delete_returning", False))
 
+        if not force and self._supports_soft_delete():
+            supports_update_returning = bool(getattr(dialect, "update_returning", False))
+            deletion_time = now()
+            stmt = (
+                update(self.model)
+                .where(self.pk.in_(ids), self.model.deleted_at.is_(None))
+                .values(deleted_at=deletion_time)
+            )
+
+            if supports_update_returning:
+                stmt = stmt.returning(self.model)
+                result = await self.db.execute(stmt)
+                await self.db.flush()
+                return list(result.scalars().all())
+
+            await self.db.execute(stmt)
+            await self.db.flush()
+            query = select(self.model).where(self.pk.in_(ids))
+            res = await self.db.execute(query)
+            return list(res.scalars().all())
+
         if supports_returning:
             stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
             result = await self.db.scalars(stmt)
             await self.db.flush()
             return list(result.all())
         else:
-            records = list(await self.get_by_ids(ids=ids))
+            query = select(self.model).where(self.pk.in_(ids))
+            records_res = await self.db.execute(query)
+            records = list(records_res.scalars().all())
             if records:
                 stmt = delete(self.model).where(self.pk.in_(ids))
                 await self.db.execute(stmt)
                 await self.db.flush()
             return records
 
+    async def restore(self, target: ModelType | Any) -> ModelType | None:
+        """Restore a previously soft-deleted record.
+
+        Args:
+            target: The model instance or primary key identifier of the record to restore.
+
+        Returns:
+            The restored database model instance, or None if the record was not found or unsupported.
+        """
+        if not self._supports_soft_delete():
+            return None
+
+        if isinstance(target, self.model):
+            record = target
+        else:
+            query = select(self.model).where(getattr(self.model, self.pk_name) == target)
+            result = await self.db.execute(query)
+            record = result.scalars().first()
+            if not record:
+                return None
+
+        record.restore()
+        await self.db.flush()
+        await self.db.refresh(record)
+        return record
+
+    async def restore_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+        """Restore multiple soft-deleted records using an atomic batch update.
+
+        Args:
+            ids: A list of primary key values of records to restore.
+
+        Returns:
+            A sequence of restored database model instances.
+        """
+        if not ids or not self._supports_soft_delete():
+            return []
+
+        dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
+        supports_update_returning = bool(getattr(dialect, "update_returning", False))
+
+        stmt = (
+            update(self.model)
+            .where(self.pk.in_(ids), self.model.deleted_at.is_not(None))
+            .values(deleted_at=None)
+        )
+
+        if supports_update_returning:
+            stmt = stmt.returning(self.model)
+            result = await self.db.execute(stmt)
+            await self.db.flush()
+            return list(result.scalars().all())
+
+        await self.db.execute(stmt)
+        await self.db.flush()
+        query = select(self.model).where(self.pk.in_(ids))
+        res = await self.db.execute(query)
+        return list(res.scalars().all())
+
 
 class SearchRepositoryMixin(AbstractRepository[ModelType]):
     """Mixin coordinating structured application search operations."""
 
-    async def search(self, search_in: "SearchRequest", pagination: Any = None) -> Any:
-        """Search and filter database models dynamically.
+    async def search(
+        self,
+        search_in: "SearchRequest",
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
+        """Search and filter database models dynamically with load optimization.
 
         Args:
             search_in: A SearchRequest parameter configuration representing constraints.
             pagination: Pagination settings. Defaults to None.
+            fields: Specific entity fields to selectively load. Defaults to None.
+            options: Additional SQLAlchemy executable options. Defaults to None.
 
         Returns:
             A paginated response object containing matches, or a complete list of
@@ -416,6 +524,16 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
 
         engine = SearchEngine(self.model)
         base_query = self._get_base_query()
+
+        if fields:
+            base_query = base_query.options(load_only(*fields))
+        if options:
+            base_query = (
+                base_query.options(*options)
+                if isinstance(options, list)
+                else base_query.options(options)
+            )
+
         query = engine.build_base_query(search_in, base_query=base_query)
         query = self._apply_filters(query)
         if pagination is None:

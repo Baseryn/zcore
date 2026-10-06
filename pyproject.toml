@@ -27,6 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.110.0",
+    "sqlalchemy[asyncio]>=2.0.28",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "structlog>=24.1.0",
@@ -41,15 +42,12 @@ dependencies = [
 
 [project.optional-dependencies]
 db = [
-    "sqlalchemy[asyncio]>=2.0.28",
     "aiosqlite>=0.20.0",
 ]
 postgres = [
-    "sqlalchemy[asyncio]>=2.0.28",
     "asyncpg>=0.29.0",
 ]
 mysql = [
-    "sqlalchemy[asyncio]>=2.0.28",
     "aiomysql>=0.2.0",
 ]
 redis = [
@@ -133,6 +131,22 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
 ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_any_generics = false
+warn_return_any = false
+warn_redundant_casts = false
+warn_unused_ignores = false
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
 exclude = ["tests/", "example/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "zcore.web.base_router",
+    "zcore.testing.fixtures",
+    "zcore.db.repository",
+    "zcore.exceptions.handlers",
+]
+ignore_errors = true

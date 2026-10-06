@@ -112,9 +112,9 @@ def test_cli_startapp_scaffolding(
         assert (app_dir / file).is_file()
 
     if with_test:
-        assert (app_dir / "tests.py").is_file()
+        assert (app_dir / f"test_{app_name}.py").is_file()
     else:
-        assert not (app_dir / "tests.py").exists()
+        assert not (app_dir / f"test_{app_name}.py").exists()
 
     plugin_content = (app_dir / "plugin.py").read_text(encoding="utf-8")
     models_content = (app_dir / "models.py").read_text(encoding="utf-8")
@@ -207,9 +207,11 @@ def test_cli_run_outside_project_root(run_in_tmp_path: Path) -> None:
         assert exc_info.value.code == 1
 
 
-def test_cli_run_with_uvicorn_mock(run_in_tmp_path: Path) -> None:
+def test_cli_run_default_cascading(run_in_tmp_path: Path) -> None:
     (run_in_tmp_path / "main.py").touch()
-    (run_in_tmp_path / ".env").write_text("HOST=127.0.0.1\nPORT=8080\n", encoding="utf-8")
+    (run_in_tmp_path / ".env").write_text(
+        "HOST=127.0.0.1\nPORT=8080\nLOG_LEVEL=warning\n", encoding="utf-8"
+    )
     test_args = ["zc", "run"]
 
     with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):
@@ -217,12 +219,71 @@ def test_cli_run_with_uvicorn_mock(run_in_tmp_path: Path) -> None:
         mock_run.assert_called_once()
         args, kwargs = mock_run.call_args
         cmd = args[0]
-        assert any("uvicorn" in item for item in cmd)
-        assert any("main:app" in item for item in cmd)
-        assert any("--host=127.0.0.1" in item for item in cmd)
-        assert any("--port=8080" in item for item in cmd)
-        assert any("--reload" in item for item in cmd)
+        assert "uvicorn" in cmd
+        assert "main:app" in cmd
+        assert "--host=127.0.0.1" in cmd
+        assert "--port=8080" in cmd
+        assert "--log-level=warning" in cmd
+        assert "--reload" in cmd
         assert "PYTHONPATH" in kwargs.get("env", {})
+
+
+def test_cli_run_cli_overrides_env(run_in_tmp_path: Path) -> None:
+    (run_in_tmp_path / "main.py").touch()
+    (run_in_tmp_path / ".env").write_text("HOST=127.0.0.1\nPORT=8080\n", encoding="utf-8")
+    test_args = ["zc", "run", "--host=0.0.0.0", "--port=9000", "--no-reload", "--log-level=debug"]
+
+    with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):
+        main()
+        mock_run.assert_called_once()
+        args, _ = mock_run.call_args
+        cmd = args[0]
+        assert "--host=0.0.0.0" in cmd
+        assert "--port=9000" in cmd
+        assert "--log-level=debug" in cmd
+        assert "--reload" not in cmd
+
+
+def test_cli_run_workers_disables_reload(run_in_tmp_path: Path) -> None:
+    (run_in_tmp_path / "main.py").touch()
+    test_args = ["zc", "run", "--workers=4"]
+
+    with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):
+        main()
+        mock_run.assert_called_once()
+        args, _ = mock_run.call_args
+        cmd = args[0]
+        assert "--workers=4" in cmd
+        assert "--reload" not in cmd
+
+
+def test_cli_run_transparent_extra_args(run_in_tmp_path: Path) -> None:
+    (run_in_tmp_path / "main.py").touch()
+    test_args = ["zc", "run", "--root-path=/api/v1", "--proxy-headers", "--limit-concurrency=1000"]
+
+    with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):
+        main()
+        mock_run.assert_called_once()
+        args, _ = mock_run.call_args
+        cmd = args[0]
+        assert "--root-path=/api/v1" in cmd
+        assert "--proxy-headers" in cmd
+        assert "--limit-concurrency=1000" in cmd
+
+
+def test_cli_run_custom_app_and_env_file(run_in_tmp_path: Path) -> None:
+    (run_in_tmp_path / "app_entry.py").touch()
+    (run_in_tmp_path / "prod.env").write_text("HOST=10.0.0.1\nPORT=5000\n", encoding="utf-8")
+    test_args = ["zc", "run", "app_entry:application", "--env-file=prod.env"]
+
+    with patch("subprocess.run") as mock_run, patch.object(sys, "argv", test_args):
+        main()
+        mock_run.assert_called_once()
+        args, _ = mock_run.call_args
+        cmd = args[0]
+        assert "app_entry:application" in cmd
+        assert "--host=10.0.0.1" in cmd
+        assert "--port=5000" in cmd
 
 
 def test_project_detection_helpers(run_in_tmp_path: Path) -> None:
@@ -269,18 +330,18 @@ def test_scaffolded_templates_are_valid_python(
             compile(code, str(py_file), "exec")
 
 
-def test_cli_version_output_beta_9() -> None:
+def test_cli_version_output_rc2() -> None:
     with console.capture() as capture:
         test_args = ["zc", "--version"]
         with patch.object(sys, "argv", test_args):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
-    assert "0.1.0-rc.1" in capture.get()
+    assert "0.1.0-rc.2" in capture.get()
 
     with console.capture() as capture:
         print_banner()
-    assert "0.1.0-rc.1" in capture.get()
+    assert "0.1.0-rc.2" in capture.get()
 
 
 def test_cli_scaffold_templates_use_database_settings_config(run_in_tmp_path: Path) -> None:

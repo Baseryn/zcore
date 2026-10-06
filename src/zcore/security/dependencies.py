@@ -20,6 +20,16 @@ async def get_current_user_stub() -> UserProtocol:
     Raises:
         NotImplementedError: If invoked directly without a configured dependency override.
     """
-    raise NotImplementedError(
-        "Dependency override is required for get_current_user_stub"
-    )
+    raise NotImplementedError("Dependency override is required for get_current_user_stub")
+
+
+async def get_optional_user_stub() -> UserProtocol | None:
+    """Stub dependency for optionally retrieving the currently authenticated user.
+
+    This function acts as a dependency injection anchor for routes supporting
+    optional authentication. Returns None if unauthenticated or unconfigured.
+
+    Returns:
+        An object implementing the UserProtocol, or None if unauthenticated.
+    """
+    return None

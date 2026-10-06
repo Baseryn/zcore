@@ -27,6 +27,14 @@ if TYPE_CHECKING:
     from zcore.db.setup import Actions, Base, SessionDep, db_manager, get_db
     from zcore.db.soft_delete import SoftDeleteMixin
     from zcore.db.uow import UnitOfWork
+    from zcore.exceptions import (
+        app_exception_handler,
+        http_exception_handler,
+        register_exception_handlers,
+        request_validation_exception_handler,
+        response_validation_exception_handler,
+        unhandled_exception_handler,
+    )
     from zcore.kernel.di import (
         Inject,
         Injector,
@@ -39,6 +47,10 @@ if TYPE_CHECKING:
     from zcore.kernel.events import EventDispatcher, on_event
     from zcore.kernel.plugins import Plugin
     from zcore.security.auth import BaseAuth
+    from zcore.security.dependencies import (
+        get_current_user_stub,
+        get_optional_user_stub,
+    )
     from zcore.security.permissions import BasePermission, HasScopes
     from zcore.security.protocols import UserProtocol
     from zcore.security.security import Security
@@ -101,6 +113,7 @@ __all__ = [
     "ZCoreRequest",
     "ZDateTime",
     "Zchema",
+    "app_exception_handler",
     "background_scope",
     "background_task",
     "container",
@@ -109,18 +122,25 @@ __all__ = [
     "dispatch_db_event",
     "format_iso_with_app_timezone",
     "get_app_timezone",
+    "get_current_user_stub",
     "get_db",
+    "get_optional_user_stub",
     "get_settings",
     "get_storage_provider",
+    "http_exception_handler",
     "initialize_settings",
     "json_dumps",
     "json_loads",
     "now",
     "on_event",
     "register_db_event_dispatcher",
+    "register_exception_handlers",
+    "request_validation_exception_handler",
+    "response_validation_exception_handler",
     "settings",
     "slugify",
     "to_app_timezone",
+    "unhandled_exception_handler",
     "utc_now",
 ]
 
@@ -251,6 +271,14 @@ def __getattr__(name: str) -> Any:
         from zcore.security.auth import BaseAuth
 
         return BaseAuth
+    if name == "get_current_user_stub":
+        from zcore.security.dependencies import get_current_user_stub
+
+        return get_current_user_stub
+    if name == "get_optional_user_stub":
+        from zcore.security.dependencies import get_optional_user_stub
+
+        return get_optional_user_stub
     if name == "BasePermission":
         from zcore.security.permissions import BasePermission
 
@@ -375,5 +403,16 @@ def __getattr__(name: str) -> Any:
         from zcore.utils.helpers import CustomJSONEncoder
 
         return CustomJSONEncoder
+    if name in (
+        "app_exception_handler",
+        "http_exception_handler",
+        "register_exception_handlers",
+        "request_validation_exception_handler",
+        "response_validation_exception_handler",
+        "unhandled_exception_handler",
+    ):
+        import zcore.exceptions.handlers as handlers_module
+
+        return getattr(handlers_module, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

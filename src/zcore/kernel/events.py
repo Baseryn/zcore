@@ -76,9 +76,7 @@ class EventDispatcher:
             cls: The target service class type to inspect.
             container: The active IoCContainer instance used for class resolution.
         """
-        for name, method in inspect.getmembers(
-            cls, predicate=inspect.iscoroutinefunction
-        ):
+        for name, method in inspect.getmembers(cls, predicate=inspect.iscoroutinefunction):
             event_name = getattr(method, "_event_listener", None)
             if event_name:
 
@@ -121,7 +119,7 @@ class EventDispatcher:
                     f"Error preparing event handler {handler.__name__} for event '{event_name}': {e}"
                 )
 
-        async_results = []
+        async_results: list[Any] = []
         if async_tasks:
             results = await asyncio.gather(*async_tasks, return_exceptions=True)
             for res in results:

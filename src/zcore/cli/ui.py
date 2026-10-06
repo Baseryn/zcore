@@ -11,15 +11,17 @@ ZCORE_ACCENT = "#06b6d4"
 ZCORE_MUTED = "#64748b"
 ZCORE_TEXT = "#f8fafc"
 
-custom_style = Style([
-    ("qmark", f"fg:{ZCORE_PRIMARY} bold"),
-    ("question", f"fg:{ZCORE_TEXT} bold"),
-    ("answer", f"fg:{ZCORE_PRIMARY} bold"),
-    ("pointer", f"fg:{ZCORE_PRIMARY} bold"),
-    ("highlighted", f"fg:{ZCORE_PRIMARY} bold"),
-    ("selected", f"fg:{ZCORE_PRIMARY}"),
-    ("instruction", f"fg:{ZCORE_MUTED} italic"),
-])
+custom_style = Style(
+    [
+        ("qmark", f"fg:{ZCORE_PRIMARY} bold"),
+        ("question", f"fg:{ZCORE_TEXT} bold"),
+        ("answer", f"fg:{ZCORE_PRIMARY} bold"),
+        ("pointer", f"fg:{ZCORE_PRIMARY} bold"),
+        ("highlighted", f"fg:{ZCORE_PRIMARY} bold"),
+        ("selected", f"fg:{ZCORE_PRIMARY}"),
+        ("instruction", f"fg:{ZCORE_MUTED} italic"),
+    ]
+)
 
 
 def print_banner() -> None:
@@ -27,7 +29,7 @@ def print_banner() -> None:
     console.print()
     console.print(
         f"[bold {ZCORE_PRIMARY}]⚡ ZCore Framework[/bold {ZCORE_PRIMARY}] "
-        f"[dim white]v0.1.0-rc.1[/dim white] "
+        f"[dim white]v0.1.0-rc.2[/dim white] "
         f"[{ZCORE_MUTED}]• Modern Modular Monolith[/{ZCORE_MUTED}]"
     )
     console.print(f" [dim {ZCORE_MUTED}]FastAPI • SQLAlchemy 2.0 • Pydantic V2[/dim {ZCORE_MUTED}]")

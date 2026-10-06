@@ -14,11 +14,11 @@ from sqlalchemy import Column, Integer, Uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
-from zcore.context.context import ZContext
+from zcore.context.context import ZContext, ctx
 from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
-from zcore.exceptions.handlers import app_exception_handler
+from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
 from zcore.kernel.di import _current_scope_id, container
 from zcore.utils.timezone import get_app_timezone
 from zcore.web.api_router import ZCoreRequest
@@ -37,6 +37,7 @@ class DummyModel:
         mock_actions.CREATE = "dummy:create"
         mock_actions.VIEW = "dummy:view"
         mock_actions.LISTVIEW = "dummy:listview"
+        mock_actions.LOOKUP = "dummy:lookup"
         mock_actions.UPDATE = "dummy:update"
         mock_actions.DELETE = "dummy:delete"
         return mock_actions
@@ -47,6 +48,11 @@ class DummyCreate(BaseModel):
 
 
 class DummyUpdate(BaseModel):
+    name: str
+
+
+class DummyLookup(BaseModel):
+    id: str
     name: str
 
 
@@ -70,6 +76,15 @@ class DummyOutWithNested(Zchema):
     profile: NestedProfile
 
 
+class PrivateFieldModel(Zchema):
+    __model__ = "secret_entity"
+    __private__: ClassVar[set[str]] = {"cost_price", "internal_notes"}
+    id: str
+    name: str
+    cost_price: float = 0.0
+    internal_notes: str | None = None
+
+
 class TargetService:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
@@ -83,7 +98,7 @@ class TargetService:
 
 class MockFullService:
     def __init__(self) -> None:
-        pass
+        self.deleted_ids: list[tuple[uuid.UUID, bool]] = []
 
     async def create(self, schema: DummyCreate) -> DummyOut:
         return DummyOut(id="123", name=schema.name, password="safe")
@@ -97,15 +112,17 @@ class MockFullService:
             return PaginatedResult(data=data, meta={"total": 1, "page": pagination.page})
         return data
 
-    async def search(self, search_in: Any, pagination: Any = None) -> Any:
+    async def search(
+        self, search_in: Any, pagination: Any = None, fields: Any = None, options: Any = None
+    ) -> Any:
         return [DummyOut(id="1", name="search_res", password="s1")]
 
     async def update(self, id: uuid.UUID, schema: DummyUpdate, partial: bool = False) -> DummyOut:
         name = schema.name if schema.name else "patched"
         return DummyOut(id=str(id), name=name, password="safe")
 
-    async def delete(self, id: uuid.UUID) -> None:
-        pass
+    async def delete(self, id: uuid.UUID, force: bool = False) -> None:
+        self.deleted_ids.append((id, force))
 
 
 def clean_endpoint_signature(endpoint: Any) -> Any:
@@ -125,7 +142,9 @@ def clean_endpoint_signature(endpoint: Any) -> Any:
         call_strs.append(f"{name}={name}")
     param_line = ", ".join(param_strs)
     call_line = ", ".join(call_strs)
-    func_code = f"async def clean_endpoint({param_line}):\n    return await _orig_endpoint({call_line})"
+    func_code = (
+        f"async def clean_endpoint({param_line}):\n    return await _orig_endpoint({call_line})"
+    )
     local_dict: dict[str, Any] = {}
     exec(func_code, globals_dict, local_dict)
     clean_func = local_dict["clean_endpoint"]
@@ -138,15 +157,20 @@ def clean_endpoint_signature(endpoint: Any) -> Any:
     [
         (
             {"service": None},
-            "Service class must be defined"
+            "Service class must be defined",
         ),
         (
             {"service": MagicMock(), "create_schema": None, "exclude": set()},
-            "POST route is enabled"
+            "POST route is enabled",
         ),
         (
-            {"service": MagicMock(), "create_schema": DummyCreate, "update_schema": None, "exclude": set()},
-            "UPDATE/PATCH route is enabled"
+            {
+                "service": MagicMock(),
+                "create_schema": DummyCreate,
+                "update_schema": None,
+                "exclude": set(),
+            },
+            "UPDATE/PATCH route is enabled",
         ),
         (
             {
@@ -155,11 +179,13 @@ def clean_endpoint_signature(endpoint: Any) -> Any:
                 "update_schema": DummyUpdate,
                 "model": None,
             },
-            "Model class must be defined"
+            "Model class must be defined",
         ),
-    ]
+    ],
 )
-def test_router_auto_scaffolding_validation_errors(router_attrs: dict[str, Any], expected_error_msg: str) -> None:
+def test_router_auto_scaffolding_validation_errors(
+    router_attrs: dict[str, Any], expected_error_msg: str
+) -> None:
     attrs = {
         "model": DummyModel,
         "create_schema": DummyCreate,
@@ -181,31 +207,35 @@ def test_router_auto_scaffolding_validation_errors(router_attrs: dict[str, Any],
             {"dummy.password", "resource.dummy.password"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA"},
-            ["Authorization", "Cookie"]
+            ["Authorization", "Cookie"],
         ),
         (
             set(),
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
             {"id": "12345678-1234-5678-1234-567812345678", "name": "UserA", "password": "hash"},
-            []
-        )
-    ]
+            [],
+        ),
+    ],
 )
 async def test_router_schema_projection_pruning(
     monkeypatch: pytest.MonkeyPatch,
     restricted_fields: set[str],
     payload_in: dict[str, Any],
     expected_payload_out: dict[str, Any],
-    expected_vary: list[str]
+    expected_vary: list[str],
 ) -> None:
     original_add_api_route = APIRouter.add_api_route
 
-    def patched_add_api_route(self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any) -> Any:
+    def patched_add_api_route(
+        self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any
+    ) -> Any:
         clean_endpoint = clean_endpoint_signature(endpoint)
         return original_add_api_route(self, path, clean_endpoint, *args, **kwargs)
 
     monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
-    monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset(restricted_fields)))
+    monkeypatch.setattr(
+        ZContext, "restricted_fields", property(lambda self: frozenset(restricted_fields))
+    )
     app = FastAPI()
     mock_service = TargetService(payload_in)
     container.register_singleton(TargetService, mock_service)
@@ -224,7 +254,7 @@ async def test_router_schema_projection_pruning(
 
     router_inst = TargetRouter()
     app.include_router(router_inst.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/items/12345678-1234-5678-1234-567812345678")
         assert response.status_code == 200
@@ -246,9 +276,11 @@ async def test_router_schema_projection_pruning(
     [
         ("my-custom-request-id-123", False),
         (None, True),
-    ]
+    ],
 )
-async def test_request_id_middleware(custom_request_id: str | None, expect_valid_uuid: bool) -> None:
+async def test_request_id_middleware(
+    custom_request_id: str | None, expect_valid_uuid: bool
+) -> None:
     app = FastAPI()
     app.add_middleware(RequestLogMiddleware)
 
@@ -256,7 +288,7 @@ async def test_request_id_middleware(custom_request_id: str | None, expect_valid
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         headers = {}
         if custom_request_id:
@@ -275,8 +307,12 @@ async def test_request_id_middleware(custom_request_id: str | None, expect_valid
 async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     original_add_api_route = APIRouter.add_api_route
 
-    def patched_add_api_route(self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any) -> Any:
-        return original_add_api_route(self, path, clean_endpoint_signature(endpoint), *args, **kwargs)
+    def patched_add_api_route(
+        self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        return original_add_api_route(
+            self, path, clean_endpoint_signature(endpoint), *args, **kwargs
+        )
 
     monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
     app = FastAPI()
@@ -297,27 +333,96 @@ async def test_router_full_crud_endpoints(monkeypatch: pytest.MonkeyPatch) -> No
 
     r = FullCrudRouter()
     app.include_router(r.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.post("/crud/", json={"name": "new_item"})
         assert res.status_code == 201
         assert res.json()["data"]["name"] == "new_item"
-        res = await client.get("/crud/12345678-1234-5678-1234-567812345678")
+
+        target_uuid = "12345678-1234-5678-1234-567812345678"
+        res = await client.get(f"/crud/{target_uuid}")
         assert res.status_code == 200
         assert res.json()["data"]["name"] == "retrieved"
+
         res = await client.get("/crud/?page=2&size=10")
         assert res.status_code == 200
         assert res.json()["data"][0]["name"] == "n1"
         assert res.json()["meta"]["page"] == 2
+
         res = await client.post("/crud/search", json={"filters": [], "size": 10})
         assert res.status_code == 200
         assert res.json()["data"][0]["name"] == "search_res"
-        res = await client.patch("/crud/12345678-1234-5678-1234-567812345678", json={"name": "patched_item"})
+
+        res = await client.patch(f"/crud/{target_uuid}", json={"name": "patched_item"})
         assert res.status_code == 200
         assert res.json()["data"]["name"] == "patched_item"
-        res = await client.delete("/crud/12345678-1234-5678-1234-567812345678")
+
+        res = await client.delete(f"/crud/{target_uuid}")
         assert res.status_code == 200
         assert res.json()["message"] == "Deleted successfully"
+        assert len(service_inst.deleted_ids) == 1
+        assert service_inst.deleted_ids[0] == (uuid.UUID(target_uuid), False)
+
+        res_force = await client.delete(f"/crud/{target_uuid}?force=true")
+        assert res_force.status_code == 200
+        assert len(service_inst.deleted_ids) == 2
+        assert service_inst.deleted_ids[1] == (uuid.UUID(target_uuid), True)
+
+
+@pytest.mark.anyio
+async def test_router_lookup_endpoint_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_add_api_route = APIRouter.add_api_route
+
+    def patched_add_api_route(
+        self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        return original_add_api_route(
+            self, path, clean_endpoint_signature(endpoint), *args, **kwargs
+        )
+
+    monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    service_inst = MockFullService()
+    container.register_singleton(MockFullService, service_inst)
+
+    class LookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = DummyLookup
+        allowed_lookup_fields: ClassVar[set[str]] = {"id", "name"}
+        max_lookup_size = 50
+        service = MockFullService
+        prefix = "/lookup-test"
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = LookupRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        valid_res = await client.post(
+            "/lookup-test/lookup",
+            json={"filters": [{"field": "name", "op": "eq", "value": "test"}], "size": 20},
+        )
+        assert valid_res.status_code == 200
+        body = valid_res.json()
+        assert body["success"] is True
+        assert isinstance(body["data"], list)
+
+        invalid_res = await client.post(
+            "/lookup-test/lookup",
+            json={"filters": [{"field": "unauthorized_field", "op": "eq", "value": "test"}]},
+        )
+        assert invalid_res.status_code == 400
+        invalid_body = invalid_res.json()
+        assert invalid_body["success"] is False
+        assert "not permitted in lookup" in invalid_body["message"]
 
 
 @pytest.mark.anyio
@@ -329,7 +434,7 @@ async def test_router_exception_translation_handler() -> None:
     async def raise_error() -> None:
         raise EntityNotFound(message="Missing item", payload={"key": "val"})
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/error")
         assert res.status_code == 404
@@ -343,7 +448,9 @@ async def test_router_exception_translation_handler() -> None:
 async def test_zchema_recursive_nested_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
     nested = NestedProfile(phone="12345", city="Tehran")
     model = DummyOutWithNested(id="1", name="A", profile=nested)
-    monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.profile.phone"})))
+    monkeypatch.setattr(
+        ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.profile.phone"}))
+    )
     serialized = model.model_dump(mode="json")
     assert "phone" not in serialized["profile"]
     assert serialized["profile"]["city"] == "Tehran"
@@ -353,14 +460,18 @@ async def test_zchema_recursive_nested_pruning(monkeypatch: pytest.MonkeyPatch) 
 async def test_zchema_wildcard_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
     nested = NestedProfile(phone="12345", city="Tehran")
     model = DummyOutWithNested(id="1", name="A", profile=nested)
-    monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.*"})))
+    monkeypatch.setattr(
+        ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.*"}))
+    )
     serialized = model.model_dump(mode="json")
     assert serialized == {}
 
 
 @pytest.mark.anyio
 async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.password"})))
+    monkeypatch.setattr(
+        ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.password"}))
+    )
     app = FastAPI()
 
     class ExposureRouter(BaseRouter[DummyCreate, DummyUpdate]):
@@ -377,7 +488,7 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     r = ExposureRouter()
     app.include_router(r.router)
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res_post = await client.post("/exposure/?schema=true")
         assert res_post.status_code == 200
@@ -395,7 +506,7 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         "a" * 70,
         "inject<script>",
         "bad_char$",
-    ]
+    ],
 )
 async def test_request_id_validation_pattern(bad_id: str) -> None:
     app = FastAPI()
@@ -405,7 +516,7 @@ async def test_request_id_validation_pattern(bad_id: str) -> None:
     def root() -> dict[str, Any]:
         return {}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/", headers={"x-request-id": bad_id})
         res_id = res.headers.get("x-request-id")
@@ -431,7 +542,7 @@ async def test_scoped_dependency_middleware_lifecycle(monkeypatch: pytest.Monkey
         registered_session = container.resolve(AsyncSession)
         return {"scope_id": scope_id, "session_is_mock": registered_session is mock_session}
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/scoped")
         assert res.status_code == 200
@@ -583,17 +694,21 @@ def test_base_router_weighted_route_specificity_sorting() -> None:
         create_schema = DummyCreate
         update_schema = DummyUpdate
         schema_out = DummyOut
+        lookup_schema = DummyLookup
         service = DummyService
         prefix = "/api/items"
 
     router_inst = SpecificityRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/api/items/search" in paths
+    assert "/api/items/lookup" in paths
     assert "/api/items/{id:uuid}" in paths
 
     idx_search = paths.index("/api/items/search")
+    idx_lookup = paths.index("/api/items/lookup")
     idx_dynamic = paths.index("/api/items/{id:uuid}")
     assert idx_search < idx_dynamic
+    assert idx_lookup < idx_dynamic
 
 
 def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -644,7 +759,9 @@ def test_zchema_input_validation_preserves_raw_types() -> None:
 
 
 @pytest.mark.anyio
-async def test_request_log_middleware_captures_status_and_client_ip() -> None:
+async def test_request_log_middleware_captures_status_and_client_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     app = FastAPI()
     app.add_middleware(RequestLogMiddleware)
 
@@ -652,8 +769,28 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
     def get_status() -> dict[str, str]:
         return {"status": "ok"}
 
+    with patch("zcore.web.middleware.log.debug") as mock_log_debug:
+        transport = ASGITransport(
+            app=app, client=("192.168.1.50", 54321), raise_app_exceptions=False
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/status-test")
+            assert res.status_code == 200
+
+        mock_log_debug.assert_called_once()
+        log_kwargs = mock_log_debug.call_args[1]
+        assert log_kwargs["status_code"] == 200
+        assert log_kwargs["client_ip"] == "192.168.1.50"
+        assert log_kwargs["path"] == "/status-test"
+        assert log_kwargs["method"] == "GET"
+        assert "duration_ms" in log_kwargs
+
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings.LOGGING, "json_format", True)
     with patch("zcore.web.middleware.log.info") as mock_log_info:
-        transport = ASGITransport(app=app, client=("192.168.1.50", 54321))
+        transport = ASGITransport(
+            app=app, client=("192.168.1.50", 54321), raise_app_exceptions=False
+        )
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             res = await client.get("/status-test")
             assert res.status_code == 200
@@ -662,6 +799,125 @@ async def test_request_log_middleware_captures_status_and_client_ip() -> None:
         log_kwargs = mock_log_info.call_args[1]
         assert log_kwargs["status_code"] == 200
         assert log_kwargs["client_ip"] == "192.168.1.50"
-        assert log_kwargs["path"] == "/status-test"
-        assert log_kwargs["method"] == "GET"
-        assert "duration_ms" in log_kwargs
+
+
+@pytest.mark.anyio
+async def test_router_lookup_projection_with_sqlalchemy_model() -> None:
+    class RealLookupModel(Base):
+        __tablename__ = f"lookup_model_{uuid.uuid4().hex[:6]}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        name = Column(Integer)
+        is_active = Column(Integer)
+        secret_code = Column(Integer)
+
+    class CustomLookupOut(BaseModel):
+        id: uuid.UUID
+        name: int
+        is_active: int
+
+    class DummyService:
+        pass
+
+    class DynamicLookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = RealLookupModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = CustomLookupOut
+        allowed_lookup_fields: ClassVar[set[str]] = {"name"}
+        service = DummyService
+        prefix = "/dynamic-lookup"
+
+    router_inst = DynamicLookupRouter()
+    load_fields, loader_options = router_inst._resolve_lookup_projections()
+
+    assert load_fields is not None
+    loaded_column_names = {col.key for col in load_fields}
+    assert "id" in loaded_column_names
+    assert "name" in loaded_column_names
+    assert "is_active" in loaded_column_names
+    assert "secret_code" not in loaded_column_names
+    assert loader_options is None
+
+
+@pytest.mark.anyio
+async def test_router_lookup_projection_relationship_eager_loading() -> None:
+    from sqlalchemy import ForeignKey
+    from sqlalchemy.orm import relationship
+
+    table_suffix = uuid.uuid4().hex[:6]
+
+    class ParentModel(Base):
+        __tablename__ = f"parent_{table_suffix}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        name = Column(Integer)
+
+    class ChildModel(Base):
+        __tablename__ = f"child_{table_suffix}"
+        id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+        parent_id = Column(Uuid, ForeignKey(f"parent_{table_suffix}.id"))
+        parent = relationship("ParentModel")
+
+    class ChildLookupOut(BaseModel):
+        id: uuid.UUID
+        parent: Any
+
+    class DummyService:
+        pass
+
+    class RelationalLookupRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = ChildModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        lookup_schema = ChildLookupOut
+        service = DummyService
+        prefix = "/rel-lookup"
+
+    router_inst = RelationalLookupRouter()
+    load_fields, loader_options = router_inst._resolve_lookup_projections()
+
+    assert load_fields is not None
+    assert loader_options is not None
+    assert len(loader_options) == 1
+
+
+def test_zchema_private_fields_pruned_for_guest() -> None:
+    ctx.user_id = None
+    data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+    instance = PrivateFieldModel.model_validate(data)
+    serialized = instance.model_dump(mode="json")
+    assert "cost_price" not in serialized
+    assert "internal_notes" not in serialized
+    assert serialized["name"] == "ItemA"
+
+
+def test_zchema_private_fields_visible_for_authenticated_user() -> None:
+    ctx.user_id = uuid.uuid4()
+    try:
+        data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+        instance = PrivateFieldModel.model_validate(data)
+        serialized = instance.model_dump(mode="json")
+        assert serialized["cost_price"] == 45.0
+        assert serialized["internal_notes"] == "Confidential"
+        assert serialized["name"] == "ItemA"
+    finally:
+        ctx.user_id = None
+
+
+def test_zchema_private_fields_json_schema_pruned_for_guest() -> None:
+    ctx.user_id = None
+    schema = PrivateFieldModel.model_json_schema()
+    properties = schema.get("properties", {})
+    assert "cost_price" not in properties
+    assert "internal_notes" not in properties
+    assert "name" in properties
+
+
+def test_zchema_private_fields_input_filtering_for_guest() -> None:
+    ctx.user_id = None
+    input_data = {"id": "1", "name": "ItemA", "cost_price": 45.0, "internal_notes": "Confidential"}
+    filtered = PrivateFieldModel.filter_restricted_inputs(dict(input_data))
+    assert "cost_price" not in filtered
+    assert "internal_notes" not in filtered
+    assert filtered["name"] == "ItemA"

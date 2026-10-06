@@ -20,5 +20,5 @@ __all__ = [
     "background_scope",
     "background_task",
     "container",
-    "on_event"
+    "on_event",
 ]

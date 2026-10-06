@@ -2,7 +2,8 @@
 
 This module initializes the application's logging pipeline. It integrates standard
 Python `logging` with `structlog` via ProcessorFormatter to provide a multi-tier,
-enterprise-ready logging subsystem supporting custom handlers, file rotation, and full dictConfig overrides.
+enterprise-ready logging subsystem supporting custom handlers, file rotation, and full dictConfig overrides,
+while preserving native console formatting for configured passthrough loggers during development workflows.
 """
 
 import logging
@@ -25,14 +26,19 @@ def setup_logging(
     """Configure the global structlog and standard logging engine.
 
     Supports zero-code declarative settings from `.env`, code-level handler and processor injections,
-    and complete `logging.config.dictConfig` overrides.
+    and complete `logging.config.dictConfig` overrides. Preserves native terminal formatting
+    for passthrough loggers in development mode unless JSON structured formatting is explicitly requested.
 
     Args:
-        config: An optional `LoggingSettings` instance or dictionary configuration.
-        custom_processors: Optional list of additional structlog processors to include.
-        extra_handlers: Optional list of Python `logging.Handler` instances to attach.
+        config: An optional `LoggingSettings` instance or dictionary configuration. Defaults to None.
+        custom_processors: Optional list of additional structlog processors to include in the pipeline.
+            Defaults to None.
+        extra_handlers: Optional list of Python `logging.Handler` instances to attach to the root logger.
+            Defaults to None.
         dict_config: Optional full dictionary passed directly to `logging.config.dictConfig`.
-        log_level: Optional explicit log level override.
+            Defaults to None.
+        log_level: Optional explicit log level override (e.g. 'DEBUG', 'INFO', logging.DEBUG).
+            Defaults to None.
     """
     if dict_config is not None:
         logging.config.dictConfig(dict_config)
@@ -57,12 +63,30 @@ def setup_logging(
         cfg_level_str = getattr(cfg, "level", "INFO")
         level = getattr(logging, cfg_level_str.upper(), logging.INFO)
 
-    shared_processors = [
+    is_json = (
+        cfg.json_format if cfg.json_format is not None else not getattr(settings, "DEBUG", False)
+    )
+
+    if not is_json:
+        try:
+            from rich.traceback import install
+
+            install(show_locals=False)
+        except ImportError:
+            pass
+
+    time_stamper = (
+        structlog.processors.TimeStamper(fmt="iso")
+        if is_json
+        else structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
+    )
+
+    shared_processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
+        time_stamper,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
@@ -72,22 +96,11 @@ def setup_logging(
     if custom_processors:
         shared_processors.extend(custom_processors)
 
-    is_json = (
-        cfg.json_format
-        if cfg.json_format is not None
-        else not getattr(settings, "DEBUG", False)
+    renderer = (
+        structlog.processors.JSONRenderer()
+        if is_json
+        else structlog.dev.ConsoleRenderer(colors=True)
     )
-
-    if is_json:
-        renderer = structlog.processors.JSONRenderer()
-    else:
-        try:
-            from rich.traceback import install
-
-            install(show_locals=False)
-        except ImportError:
-            pass
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
 
     formatter = structlog.stdlib.ProcessorFormatter(
         foreign_pre_chain=shared_processors,
@@ -108,8 +121,8 @@ def setup_logging(
 
         file_handler = RotatingFileHandler(
             cfg.file_path,
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
+            maxBytes=cfg.max_bytes,
+            backupCount=cfg.backup_count,
             encoding="utf-8",
         )
         file_handler.setFormatter(formatter)
@@ -129,9 +142,19 @@ def setup_logging(
     root_logger.setLevel(level)
 
     for logger_name in cfg.muted_loggers:
-        log = logging.getLogger(logger_name)
-        log.handlers.clear()
-        log.propagate = True
+        target_logger = logging.getLogger(logger_name)
+        target_logger.handlers.clear()
+        target_logger.propagate = False
+
+    if is_json:
+        for logger_name in cfg.intercept_loggers:
+            target_logger = logging.getLogger(logger_name)
+            target_logger.handlers.clear()
+            target_logger.propagate = True
+    else:
+        for logger_name in cfg.passthrough_loggers:
+            target_logger = logging.getLogger(logger_name)
+            target_logger.propagate = False
 
     structlog.configure(
         processors=[

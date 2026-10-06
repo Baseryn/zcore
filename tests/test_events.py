@@ -22,6 +22,7 @@ class DummyContainer:
             return self.registry[cls]()
         return cls()
 
+
 class SampleService:
     def __init__(self) -> None:
         self.called = False
@@ -37,6 +38,7 @@ class SampleService:
     @on_event("sync.event")
     def sync_method(self) -> str:
         return "sync_val"
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("event_name", [f"evt_{uuid.uuid4().hex[:6]}" for _ in range(2)])
@@ -68,6 +70,7 @@ async def test_subscribe_and_unsubscribe(event_name: str) -> None:
     assert not calls
     assert res2 == []
 
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("event_name", [f"perf_{uuid.uuid4().hex[:6]}"])
 async def test_dispatch_sync_and_async(event_name: str) -> None:
@@ -94,6 +97,7 @@ async def test_dispatch_sync_and_async(event_name: str) -> None:
 
     assert elapsed < 0.09
     assert set(results) == {1.0, 2.0, 3.0}
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("event_name", [f"err_{uuid.uuid4().hex[:6]}"])
@@ -133,6 +137,7 @@ async def test_event_error_isolation(event_name: str) -> None:
     assert "async_ok_val" in results
     assert None in results
 
+
 @pytest.mark.anyio
 async def test_register_listeners_success() -> None:
     dispatcher = EventDispatcher()
@@ -146,12 +151,14 @@ async def test_register_listeners_success() -> None:
     assert instance.called is True
     assert results == ["handled_42"]
 
+
 @pytest.mark.anyio
 async def test_register_listeners_lazy_resolution() -> None:
     dispatcher = EventDispatcher()
     container = DummyContainer()
-    
+
     instances = []
+
     def factory() -> SampleService:
         inst = SampleService()
         instances.append(inst)
@@ -167,14 +174,16 @@ async def test_register_listeners_lazy_resolution() -> None:
     assert len(instances) == 2
     assert instances[0] is not instances[1]
 
+
 @pytest.mark.anyio
 async def test_register_listeners_ignores_non_decorated() -> None:
     dispatcher = EventDispatcher()
     container = DummyContainer()
     dispatcher.register_listeners(SampleService, container)
-    
+
     results = await dispatcher.dispatch("normal_method")
     assert results == []
+
 
 @pytest.mark.anyio
 async def test_register_listeners_ignores_sync_decorated() -> None:
@@ -184,6 +193,7 @@ async def test_register_listeners_ignores_sync_decorated() -> None:
 
     results = await dispatcher.dispatch("sync.event")
     assert results == []
+
 
 @pytest.mark.anyio
 async def test_dispatch_arguments_propagation() -> None:
@@ -213,71 +223,79 @@ async def test_dispatch_arguments_propagation() -> None:
     for kwargs in received_kwargs:
         assert kwargs == {"foo": "bar"}
 
+
 @pytest.mark.anyio
 async def test_dispatch_unregistered_event() -> None:
     dispatcher = EventDispatcher()
     results = await dispatcher.dispatch("missing.event")
     assert results == []
 
+
 @pytest.mark.anyio
 async def test_unsubscribe_robustness() -> None:
     dispatcher = EventDispatcher()
+
     def dummy() -> None:
         pass
+
     dispatcher.unsubscribe("missing.event", dummy)
-    
+
     dispatcher.subscribe("exists", dummy)
     dispatcher.unsubscribe("exists", lambda: None)
-    
+
     results = await dispatcher.dispatch("exists")
     assert results == [None]
+
 
 @pytest.mark.anyio
 async def test_double_subscription() -> None:
     dispatcher = EventDispatcher()
     calls = 0
+
     def dummy() -> int:
         nonlocal calls
         calls += 1
         return calls
-    
+
     dispatcher.subscribe("event", dummy)
     dispatcher.subscribe("event", dummy)
-    
+
     results = await dispatcher.dispatch("event")
     assert calls == 2
     assert set(results) == {1, 2}
 
+
 @pytest.mark.anyio
 async def test_nested_event_dispatching() -> None:
     dispatcher = EventDispatcher()
-    
+
     async def sub_handler(val: int) -> int:
         return val * 2
-        
+
     async def main_handler(val: int) -> int:
         sub_results = await dispatcher.dispatch("sub", val)
         return sub_results[0] + 10
-        
+
     dispatcher.subscribe("sub", sub_handler)
     dispatcher.subscribe("main", main_handler)
-    
+
     results = await dispatcher.dispatch("main", 5)
     assert results == [20]
+
 
 @pytest.mark.anyio
 async def test_error_during_sync_preparation() -> None:
     dispatcher = EventDispatcher()
-    
+
     def bad_sync() -> None:
         raise RuntimeError("Fail during preparation")
-        
+
     async def good_async() -> str:
         return "success"
-        
+
     dispatcher.subscribe("event", bad_sync)
     dispatcher.subscribe("event", good_async)
-    
+
     results = await dispatcher.dispatch("event")
     assert "success" in results
     assert len(results) == 1

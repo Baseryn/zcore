@@ -35,9 +35,7 @@ class BasePermission(ABC):
         """
         pass
 
-    async def has_object_permission(
-        self, request: Request, user: UserProtocol, obj: Any
-    ) -> bool:
+    async def has_object_permission(self, request: Request, user: UserProtocol, obj: Any) -> bool:
         """Evaluate if the current user has access to a specific object resource.
 
         Args:

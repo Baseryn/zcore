@@ -1,6 +1,6 @@
 """ZCore Core Business Service Layer.
 
-This module provides the structural base service abstractions and mixins for orchestration
+This module provides structural base service abstractions and mixins for orchestration
 of domain logic in the ZCore framework. It coordinates transactional operations, integrates
 lifecycle hooks (pre- and post-execution stages), and facilitates safe unit-of-work
 commits to prevent premature transactional boundaries from breaking transaction atomicity.
@@ -113,9 +113,7 @@ class ReadServiceMixin(AbstractService[ModelType]):
         Raises:
             EntityNotFound: If the target entity identifier is not found in the database.
         """
-        result = await self.repository.get(
-            *criterion, fields=fields, options=options, **filters
-        )
+        result = await self.repository.get(*criterion, fields=fields, options=options, **filters)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
         return await self.post_get(result)
@@ -164,14 +162,10 @@ class ReadServiceMixin(AbstractService[ModelType]):
 
 
 class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
-    """Mixin implementing standardized mutation and persistence orchestration routines."""
+    """Mixin implementing standardized mutation, persistence, and deletion orchestration routines."""
 
     async def pre_create(self, schema: BaseModel) -> dict[str, Any] | None:
-        """Hook triggered prior to single-record database insertion.
-
-        Returns:
-            An optional dictionary containing values to merge with the creation payload.
-        """
+        """Hook triggered prior to single-record database insertion."""
         return None
 
     async def post_create(self, model: ModelType) -> None:
@@ -189,25 +183,14 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
     async def pre_update(
         self, target: ModelType | Any, schema: BaseModel, partial: bool
     ) -> dict[str, Any] | None:
-        """Hook triggered prior to modifying a record.
-
-        Args:
-            target: The model instance or primary key of the record to update.
-            schema: The validated update schema.
-            partial: Boolean indicating whether unset fields are excluded.
-
-        Returns:
-            An optional dictionary containing values to merge with the update payload.
-        """
+        """Hook triggered prior to modifying a record."""
         return None
 
     async def post_update(self, model: ModelType) -> None:
         """Hook triggered after modifying a single record."""
         pass
 
-    async def pre_update_multi(
-        self, data: dict[ModelType | Any, BaseModel], partial: bool
-    ) -> None:
+    async def pre_update_multi(self, data: dict[ModelType | Any, BaseModel], partial: bool) -> None:
         """Hook triggered prior to updating a batch of records."""
         pass
 
@@ -215,20 +198,36 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Hook triggered after updating a batch of records."""
         pass
 
-    async def pre_delete(self, id: Any) -> None:
+    async def pre_delete(self, id: Any, force: bool = False) -> None:
         """Hook triggered prior to deleting a single record."""
         pass
 
-    async def post_delete(self, model: ModelType) -> None:
+    async def post_delete(self, model: ModelType, force: bool = False) -> None:
         """Hook triggered after deleting a single record."""
         pass
 
-    async def pre_delete_multi(self, ids: list[Any]) -> None:
+    async def pre_delete_multi(self, ids: list[Any], force: bool = False) -> None:
         """Hook triggered prior to deleting a batch of records."""
         pass
 
-    async def post_delete_multi(self, models: Sequence[ModelType]) -> None:
+    async def post_delete_multi(self, models: Sequence[ModelType], force: bool = False) -> None:
         """Hook triggered after deleting a batch of records."""
+        pass
+
+    async def pre_restore(self, id: Any) -> None:
+        """Hook triggered prior to restoring a single soft-deleted record."""
+        pass
+
+    async def post_restore(self, model: ModelType) -> None:
+        """Hook triggered after restoring a single soft-deleted record."""
+        pass
+
+    async def pre_restore_multi(self, ids: list[Any]) -> None:
+        """Hook triggered prior to restoring a batch of soft-deleted records."""
+        pass
+
+    async def post_restore_multi(self, models: Sequence[ModelType]) -> None:
+        """Hook triggered after restoring a batch of soft-deleted records."""
         pass
 
     async def _safe_commit(self) -> None:
@@ -270,26 +269,24 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         """Execute core batch-record updates in database."""
         return await self.repository.update_multi(data, partial, refresh=refresh)
 
-    async def on_delete(self, target: ModelType | Any) -> ModelType | None:
+    async def on_delete(self, target: ModelType | Any, force: bool = False) -> ModelType | None:
         """Execute core single-record deletion in database."""
-        return await self.repository.delete(target)
+        return await self.repository.delete(target, force=force)
 
-    async def on_delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+    async def on_delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
         """Execute core batch-record deletions in database."""
-        return await self.repository.delete_multi(ids)
+        return await self.repository.delete_multi(ids, force=force)
+
+    async def on_restore(self, target: ModelType | Any) -> ModelType | None:
+        """Execute core single-record restoration in database."""
+        return await self.repository.restore(target)
+
+    async def on_restore_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+        """Execute core batch-record restorations in database."""
+        return await self.repository.restore_multi(ids)
 
     async def create(self, schema: BaseModel, **extra_data: Any) -> ModelType:
-        """Orchestrate the creation and persistence of a new domain entity.
-
-        Merges pre-create dictionary output with the creation payload.
-
-        Args:
-            schema: Validated parameters containing fields for the new record.
-            **extra_data: Extra fields to append during initialization.
-
-        Returns:
-            The created and processed database model instance.
-        """
+        """Orchestrate the creation and persistence of a new domain entity."""
         hook_data = await self.pre_create(schema) or {}
         combined_extra = {**hook_data, **extra_data}
         result = await self.on_create(schema, **combined_extra)
@@ -314,20 +311,7 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         partial: bool = False,
         **extra_data: Any,
     ) -> ModelType:
-        """Orchestrate modifications to an existing domain entity or instance.
-
-        Args:
-            target: The model instance or primary key of the record to update.
-            schema: Validated fields representing the modifications.
-            partial: If True, applies changes as a partial patch. Defaults to False.
-            **extra_data: Extra fields to append.
-
-        Returns:
-            The updated and processed database model instance.
-
-        Raises:
-            EntityNotFound: If the target entity identifier is not found in the database.
-        """
+        """Orchestrate modifications to an existing domain entity."""
         hook_data = await self.pre_update(target, schema, partial) or {}
         combined_extra = {**hook_data, **extra_data}
         result = await self.on_update(target, schema, partial, **combined_extra)
@@ -350,31 +334,39 @@ class WriteServiceMixin(Generic[ModelType], AbstractService[ModelType]):
         await self._safe_commit()
         return result
 
-    async def delete(self, target: ModelType | Any) -> ModelType:
-        """Orchestrate the deletion and cleanup of a single domain entity.
-
-        Args:
-            target: The model instance or primary key value of the target record to delete.
-
-        Returns:
-            The deleted database model instance.
-
-        Raises:
-            EntityNotFound: If the target entity identifier is not found in the database.
-        """
-        await self.pre_delete(target)
-        result = await self.on_delete(target)
+    async def delete(self, target: ModelType | Any, force: bool = False) -> ModelType:
+        """Orchestrate the deletion and cleanup of a single domain entity."""
+        await self.pre_delete(target, force=force)
+        result = await self.on_delete(target, force=force)
         if not result:
             raise EntityNotFound(message=f"{self.model.__name__} not found.")
-        await self.post_delete(result)
+        await self.post_delete(result, force=force)
         await self._safe_commit()
         return result
 
-    async def delete_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+    async def delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
         """Orchestrate batch deletions of multiple database records."""
-        await self.pre_delete_multi(ids)
-        result = await self.on_delete_multi(ids)
-        await self.post_delete_multi(result)
+        await self.pre_delete_multi(ids, force=force)
+        result = await self.on_delete_multi(ids, force=force)
+        await self.post_delete_multi(result, force=force)
+        await self._safe_commit()
+        return result
+
+    async def restore(self, target: ModelType | Any) -> ModelType:
+        """Orchestrate the restoration of a soft-deleted domain entity."""
+        await self.pre_restore(target)
+        result = await self.on_restore(target)
+        if not result:
+            raise EntityNotFound(message=f"{self.model.__name__} not found or not soft-deleted.")
+        await self.post_restore(result)
+        await self._safe_commit()
+        return result
+
+    async def restore_multi(self, ids: list[Any]) -> Sequence[ModelType]:
+        """Orchestrate batch restorations of multiple soft-deleted database records."""
+        await self.pre_restore_multi(ids)
+        result = await self.on_restore_multi(ids)
+        await self.post_restore_multi(result)
         await self._safe_commit()
         return result
 
@@ -390,23 +382,41 @@ class SearchServiceMixin(AbstractService[ModelType]):
         """Hook triggered after processing dynamic search queries."""
         pass
 
-    async def on_search(self, search_in: SearchRequest, pagination: Any = None):
+    async def on_search(
+        self,
+        search_in: SearchRequest,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
         """Execute core search queries in database."""
-        return await self.repository.search(search_in, pagination)
+        return await self.repository.search(
+            search_in, pagination=pagination, fields=fields, options=options
+        )
 
-    async def search(self, search_in: SearchRequest, pagination: Any = None) -> Any:
+    async def search(
+        self,
+        search_in: SearchRequest,
+        pagination: Any = None,
+        fields: list[Any] | None = None,
+        options: list[ExecutableOption] | None = None,
+    ) -> Any:
         """Build and execute dynamic filters, pre-loading patterns, and sorting paths.
 
         Args:
             search_in: The system-wide dynamic search request model.
             pagination: Pagination settings (cursor or offset models). Defaults to None.
+            fields: Specific entity fields to selectively load. Defaults to None.
+            options: Additional execution options. Defaults to None.
 
         Returns:
             A paginated wrapper envelope containing post-search processed records,
             or an unpaginated sequence of processed database model instances.
         """
         await self.pre_search(search_in)
-        result = await self.on_search(search_in, pagination)
+        result = await self.on_search(
+            search_in, pagination=pagination, fields=fields, options=options
+        )
         if pagination is None:
             await self.post_search(result)
             return result

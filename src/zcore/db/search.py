@@ -3,7 +3,8 @@
 This module provides a dynamic query-builder that parses client-supplied filters,
 sorting criteria, and relation-preload requests. Crucially, the system coordinates
 with security context restrictions, intercepting and blocking queries that target
-unauthorized fields or database relations, and safely handles type conversions.
+unauthorized fields or database relations, safely handles type conversions, and supports
+advanced boolean grouping and inverted filter operations.
 """
 
 from __future__ import annotations
@@ -13,11 +14,12 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, Field
-from sqlalchemy import String, and_, asc, cast, desc, inspect, or_, select
+from pydantic import BaseModel, model_validator
+from sqlalchemy import String, and_, asc, cast, desc, inspect, not_, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Select
 
+from zcore.config import settings
 from zcore.context.context import ctx
 from zcore.db.setup import Base
 from zcore.exceptions.base import ForbiddenError, ValidationError
@@ -28,22 +30,45 @@ ModelType = TypeVar("ModelType", bound=Base)
 class FilterItem(BaseModel):
     """Pydantic model representing a single, structured filtering condition.
 
-    Can model simple comparisons (e.g., field equals value) or nested relational groups
-    (e.g., OR conditions over other FilterItems).
+    Can model simple comparisons, case-sensitive/insensitive text matching, inverted operators,
+    or nested relational logical groups ('and', 'or', 'not').
 
     Attributes:
         field: The dotted path representation of the field to filter (e.g., "owner.email").
             Defaults to None.
-        op: The logical comparison or grouping operator to evaluate.
+        op: The logical comparison, negation, or grouping operator to evaluate.
         value: The parameter value used during evaluation. Defaults to None.
-        items: Nested list of sub-filters to evaluate when the operator is 'or' or 'and'.
+        items: Nested list of sub-filters to evaluate when the operator is 'or', 'and', or 'not'.
             Defaults to None.
     """
 
     field: str | None = None
     op: Literal[
-        "eq", "ne", "gt", "lt", "ge", "le", "ilike", "in", "is_null",
-        "contains", "startswith", "endswith", "between", "or", "and"
+        "eq",
+        "ne",
+        "gt",
+        "lt",
+        "ge",
+        "le",
+        "like",
+        "not_like",
+        "ilike",
+        "not_ilike",
+        "contains",
+        "not_contains",
+        "startswith",
+        "not_startswith",
+        "endswith",
+        "not_endswith",
+        "in",
+        "not_in",
+        "between",
+        "not_between",
+        "is_null",
+        "is_not_null",
+        "or",
+        "and",
+        "not",
     ]
     value: Any | None = None
     items: list[FilterItem] | None = None
@@ -70,7 +95,7 @@ class SearchRequest(BaseModel):
         include: Relationship attributes or dot-paths indicating database relationships
             to eager load. Defaults to an empty list.
         sort: Explicit ordering instructions. Defaults to an empty list.
-        size: The limit on retrieved records. Defaults to 20.
+        size: The limit on retrieved records.
         page: The target page offset index. Defaults to 1.
         cursor: Keyset pagination indicator. Defaults to None.
     """
@@ -78,9 +103,23 @@ class SearchRequest(BaseModel):
     filters: list[FilterItem] | None = []
     include: list[str] | None = []
     sort: list[SortItem] | None = []
-    size: int = Field(default=20, le=100)
+    size: int | None = None
     page: int = 1
     cursor: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_and_bound_size(self) -> SearchRequest:
+        default_size = getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
+        max_size = getattr(settings, "PAGINATION_MAX_SIZE", 100)
+
+        if self.size is None:
+            self.size = default_size
+        elif self.size < 1:
+            self.size = 1
+        elif self.size > max_size:
+            self.size = max_size
+
+        return self
 
 
 class SearchEngine:
@@ -106,11 +145,13 @@ class SearchEngine:
         self.model = model
         self.mapper = inspect(model)
         self.custom_handlers: dict[str, Callable[[Any], Any]] = {}
-        self.max_depth: int = getattr(model, "__max_search_depth__", 3)
+        self.max_depth: int = getattr(
+            model,
+            "__max_search_depth__",
+            getattr(settings, "SEARCH_MAX_DEPTH", 3),
+        )
 
-    def register_handler(
-        self, field_name: str, handler: Callable[[Any], Any]
-    ) -> SearchEngine:
+    def register_handler(self, field_name: str, handler: Callable[[Any], Any]) -> SearchEngine:
         """Bind a custom callback handler to parse a specific field's values dynamically.
 
         Args:
@@ -147,12 +188,11 @@ class SearchEngine:
 
         return False
 
-    def _validate_request(self, search_in: SearchRequest, max_depth: int = 3) -> None:
+    def _validate_request(self, search_in: SearchRequest) -> None:
         """Validate search inputs against depth limits and context security policies.
 
         Args:
             search_in: The SearchRequest input model containing requested parameters.
-            max_depth: The maximum allowable nesting depth for search filters. Defaults to 3.
 
         Raises:
             ForbiddenError: If access to a requested column or relation is restricted.
@@ -189,9 +229,7 @@ class SearchEngine:
                 for part in parts:
                     rel = inspect(current_model).relationships.get(part)
                     if not rel:
-                        raise ValidationError(
-                            message=f"Invalid include relation path: '{path}'"
-                        )
+                        raise ValidationError(message=f"Invalid include relation path: '{path}'")
                     current_model = rel.mapper.class_
 
         if search_in.sort:
@@ -273,16 +311,20 @@ class SearchEngine:
             ValidationError: If the query filter structure exceeds nesting thresholds.
         """
         if current_depth > max_depth:
-            raise ValidationError(
-                message="Search query filter structure is too complex."
-            )
+            raise ValidationError(message="Search query filter structure is too complex.")
 
         for f in filters:
-            if f.op in ["or", "and"]:
+            if f.op in ("or", "and", "not"):
                 if f.items:
                     self._validate_filters_recursive(
-                        f.items, valid_columns, restricted, current_depth + 1, max_depth
+                        f.items,
+                        valid_columns,
+                        restricted,
+                        current_depth + 1,
+                        max_depth,
                     )
+                elif f.field:
+                    self._validate_filter_field(f.field, restricted)
             else:
                 if f.field:
                     self._validate_filter_field(f.field, restricted)
@@ -302,7 +344,7 @@ class SearchEngine:
         return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def _get_operator_expression(self, f: FilterItem) -> Any:
-        """Translate a single filter block into a SQLAlchemy comparison expression.
+        """Translate a single filter block or logical group into a SQLAlchemy comparison expression.
 
         Args:
             f: The FilterItem configuration to parse.
@@ -310,10 +352,23 @@ class SearchEngine:
         Returns:
             An SQL-coerced comparison expression, or None.
         """
-        if f.op in ["or", "and"] and f.items:
+        if f.op in ("or", "and") and f.items:
             sub_exprs = [self._get_operator_expression(item) for item in f.items]
             sub_exprs = [e for e in sub_exprs if e is not None]
+            if not sub_exprs:
+                return None
             return or_(*sub_exprs) if f.op == "or" else and_(*sub_exprs)
+
+        if f.op == "not":
+            if f.items:
+                sub_exprs = [self._get_operator_expression(item) for item in f.items]
+                sub_exprs = [e for e in sub_exprs if e is not None]
+                if not sub_exprs:
+                    return None
+                return not_(and_(*sub_exprs))
+            elif f.field:
+                expr = self._build_expression_for_field(self.model, f.field, "eq", f.value)
+                return not_(expr) if expr is not None else None
 
         if f.field in self.custom_handlers:
             return self.custom_handlers[f.field](f.value)
@@ -354,9 +409,7 @@ class SearchEngine:
         target_model = rel.mapper.class_
         remaining_path = ".".join(parts[1:])
 
-        sub_expr = self._build_expression_for_field(
-            target_model, remaining_path, op, value
-        )
+        sub_expr = self._build_expression_for_field(target_model, remaining_path, op, value)
         if sub_expr is None:
             return None
 
@@ -367,7 +420,7 @@ class SearchEngine:
             return rel_attr.has(sub_expr)
 
     def _coerce_value(self, col: Any, value: Any) -> Any:
-        """Coerce incoming payload types to match the target database column types.
+        """Coerce incoming payload types to match target database column types.
 
         Args:
             col: The target database model column.
@@ -418,7 +471,7 @@ class SearchEngine:
         return value
 
     def _compare_column(self, col: Any, op: str, value: Any) -> Any:
-        """Build database comparison clauses matching standard filter operators with type safety.
+        """Build database comparison clauses matching standard and inverted operators.
 
         Args:
             col: The active comparison column.
@@ -432,43 +485,58 @@ class SearchEngine:
             ValidationError: If operator constraints or value structures are violated.
         """
         if op == "is_null":
-            return col.is_(None) if value else col.isnot(None)
+            return col.is_(None) if (value is True or value is None) else col.isnot(None)
 
-        if op in ("ilike", "startswith", "endswith", "contains"):
-            escaped_value = self._escape_like_wildcards(
-                str(value) if value is not None else ""
-            )
+        if op == "is_not_null":
+            return col.isnot(None) if (value is True or value is None) else col.is_(None)
+
+        is_negated = op.startswith("not_")
+        base_op = op[4:] if is_negated else op
+
+        if base_op in ("like", "ilike", "contains", "startswith", "endswith"):
+            escaped_value = self._escape_like_wildcards(str(value) if value is not None else "")
+
             try:
-                is_str = (
-                    hasattr(col.type, "python_type") and col.type.python_type is str
-                )
+                is_str = hasattr(col.type, "python_type") and col.type.python_type is str
             except (NotImplementedError, AttributeError):
                 is_str = False
 
             target_col = col if is_str else cast(col, String)
 
-            if op in ("ilike", "contains"):
-                return target_col.ilike(f"%{escaped_value}%", escape="\\")
-            if op == "startswith":
-                return target_col.ilike(f"{escaped_value}%", escape="\\")
-            if op == "endswith":
-                return target_col.ilike(f"%{escaped_value}", escape="\\")
+            if base_op in ("like", "not_like"):
+                pattern = f"%{escaped_value}%"
+                expr = target_col.like(pattern, escape="\\")
+            elif base_op in ("ilike", "contains"):
+                pattern = f"%{escaped_value}%"
+                expr = target_col.ilike(pattern, escape="\\")
+            elif base_op == "startswith":
+                pattern = f"{escaped_value}%"
+                expr = target_col.ilike(pattern, escape="\\")
+            elif base_op == "endswith":
+                pattern = f"%{escaped_value}"
+                expr = target_col.ilike(pattern, escape="\\")
+            else:
+                expr = target_col.ilike(f"%{escaped_value}%", escape="\\")
 
-        if op == "between":
+            return not_(expr) if is_negated else expr
+
+        if op in ("between", "not_between"):
             if not isinstance(value, (list, tuple)) or len(value) != 2:
                 col_name = getattr(col, "key", str(col))
                 raise ValidationError(
-                    message=f"Operator 'between' requires a list of exactly 2 items for column '{col_name}', received: {value}"
+                    message=f"Operator '{op}' requires a list of exactly 2 items for column '{col_name}', received: {value}"
                 )
             lower = self._coerce_value(col, value[0])
             upper = self._coerce_value(col, value[1])
-            return col.between(lower, upper)
+            expr = col.between(lower, upper)
+            return not_(expr) if op == "not_between" else expr
 
-        if op == "in":
+        if op in ("in", "not_in"):
             if not isinstance(value, (list, tuple, set)):
                 value = [value]
             coerced_list = [self._coerce_value(col, v) for v in value]
-            return col.in_(coerced_list)
+            expr = col.in_(coerced_list)
+            return not_(expr) if op == "not_in" else expr
 
         coerced_value = self._coerce_value(col, value)
 
@@ -568,5 +636,6 @@ class SearchEngine:
             A securely configured, size-bounded SQLAlchemy SELECT statement.
         """
         query = self.build_base_query(search_in)
-        offset = (search_in.page - 1) * search_in.size
-        return query.offset(offset).limit(search_in.size)
+        page_size = search_in.size or 20
+        offset = (search_in.page - 1) * page_size
+        return query.offset(offset).limit(page_size)

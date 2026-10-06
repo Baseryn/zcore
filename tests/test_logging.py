@@ -15,17 +15,16 @@ from zcore.config import LoggingSettings, settings
     [
         (True, structlog.dev.ConsoleRenderer),
         (False, structlog.processors.JSONRenderer),
-    ]
+    ],
 )
 def test_logging_format_by_environment(
-    monkeypatch: pytest.MonkeyPatch,
-    is_atty: bool,
-    expected_renderer_cls: type[Any]
+    monkeypatch: pytest.MonkeyPatch, is_atty: bool, expected_renderer_cls: type[Any]
 ) -> None:
     monkeypatch.setattr(sys.stderr, "isatty", lambda: is_atty)
     monkeypatch.setattr(settings, "DEBUG", is_atty)
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure") as mock_configure:
@@ -38,24 +37,55 @@ def test_logging_format_by_environment(
 
 
 def test_suppress_third_party_duplicate_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
-    loggers = ["uvicorn", "uvicorn.access", "sqlalchemy.engine"]
-    dummy_handlers = {name: [logging.NullHandler()] for name in loggers}
+    monkeypatch.setattr(settings, "DEBUG", False)
 
-    for name in loggers:
+    intercept_loggers = ["uvicorn", "uvicorn.access", "uvicorn.error"]
+    for name in intercept_loggers:
         logger = logging.getLogger(name)
-        logger.handlers = list(dummy_handlers[name])
+        logger.handlers = [logging.NullHandler()]
         logger.propagate = False
 
+    muted_logger = logging.getLogger("sqlalchemy.engine")
+    muted_logger.handlers = [logging.NullHandler()]
+    muted_logger.propagate = True
+
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure"):
         logging_config.setup_logging()
 
-    for name in loggers:
+    for name in intercept_loggers:
         logger = logging.getLogger(name)
         assert len(logger.handlers) == 0
         assert logger.propagate is True
+
+    assert len(muted_logger.handlers) == 0
+    assert muted_logger.propagate is False
+
+
+def test_passthrough_loggers_in_development_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "DEBUG", True)
+
+    passthrough_loggers = ["uvicorn", "uvicorn.access"]
+    dummy_handler = logging.NullHandler()
+    for name in passthrough_loggers:
+        logger = logging.getLogger(name)
+        logger.handlers = [dummy_handler]
+        logger.propagate = True
+
+    import zcore.logging.config as logging_config
+
+    importlib.reload(logging_config)
+
+    with patch("structlog.configure"):
+        logging_config.setup_logging()
+
+    for name in passthrough_loggers:
+        logger = logging.getLogger(name)
+        assert dummy_handler in logger.handlers
+        assert logger.propagate is False
 
 
 @pytest.mark.parametrize("rich_installed", [True, False])
@@ -63,6 +93,7 @@ def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_insta
     monkeypatch.setattr(settings, "DEBUG", True)
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     mock_install = MagicMock()
@@ -77,6 +108,7 @@ def test_rich_integration_debug_mode(monkeypatch: pytest.MonkeyPatch, rich_insta
         return original_import(name, *args, **kwargs)
 
     import builtins
+
     original_import = builtins.__import__
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
@@ -93,6 +125,7 @@ def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(settings, "DEBUG", False)
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure") as mock_configure:
@@ -103,7 +136,10 @@ def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> N
         assert structlog.stdlib.add_log_level in configured_processors
         assert structlog.processors.format_exc_info in configured_processors
 
-        assert any(isinstance(p, structlog.stdlib.PositionalArgumentsFormatter) for p in configured_processors)
+        assert any(
+            isinstance(p, structlog.stdlib.PositionalArgumentsFormatter)
+            for p in configured_processors
+        )
         assert any(isinstance(p, structlog.processors.TimeStamper) for p in configured_processors)
 
 
@@ -113,16 +149,15 @@ def test_shared_processors_chain_integrity(monkeypatch: pytest.MonkeyPatch) -> N
         ("DEBUG", logging.DEBUG),
         ("INFO", logging.INFO),
         ("WARNING", logging.WARNING),
-    ]
+    ],
 )
 def test_dynamic_log_level_configuration(
-    monkeypatch: pytest.MonkeyPatch,
-    log_level_setting: str,
-    expected_level: int
+    monkeypatch: pytest.MonkeyPatch, log_level_setting: str, expected_level: int
 ) -> None:
     monkeypatch.setattr(settings, "LOG_LEVEL", log_level_setting)
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure"):
@@ -165,6 +200,7 @@ def test_contextvars_binding_verification() -> None:
 
 def test_factory_and_caching_configurations(monkeypatch: pytest.MonkeyPatch) -> None:
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure") as mock_configure:
@@ -178,6 +214,7 @@ def test_factory_and_caching_configurations(monkeypatch: pytest.MonkeyPatch) -> 
 def test_setup_logging_with_logging_settings_object() -> None:
     custom_cfg = LoggingSettings(level="DEBUG", json_format=True)
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure"):
@@ -201,6 +238,7 @@ def test_setup_logging_rotating_file_handler(tmp_path: Any) -> None:
     cfg = LoggingSettings(file_path=str(log_file))
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure"):
@@ -230,6 +268,7 @@ def test_setup_logging_dict_config_override() -> None:
         },
     }
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("logging.config.dictConfig") as mock_dict_config:
@@ -239,10 +278,12 @@ def test_setup_logging_dict_config_override() -> None:
 
 def test_setup_logging_extra_handlers_and_custom_processors() -> None:
     dummy_handler = logging.NullHandler()
+
     def dummy_proc(logger, method, event_dict):
         return event_dict
 
     import zcore.logging.config as logging_config
+
     importlib.reload(logging_config)
 
     with patch("structlog.configure") as mock_configure:
