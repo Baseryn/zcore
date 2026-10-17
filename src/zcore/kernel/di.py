@@ -160,6 +160,21 @@ class IoCContainer:
 
         return self._auto_wire(interface, _stack)
 
+    def _is_registered(self, interface: type[Any]) -> bool:
+        """Check whether an interface is explicitly registered in the container."""
+        if (
+            interface in self._singletons
+            or interface in self._scoped_definitions
+            or interface in self._factories
+        ):
+            return True
+        scope_id = _current_scope_id.get()
+        if scope_id is not None:
+            current_instances = _scoped_instances.get()
+            if current_instances is not None and interface in current_instances:
+                return True
+        return False
+
     def _auto_wire(self, target_class: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Analyze, resolve parameters, and construct a class instance.
 
@@ -214,12 +229,22 @@ class IoCContainer:
             for name, param in sig.parameters.items():
                 if name == "self":
                     continue
+                if param.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
+                    continue
                 annotation = type_hints.get(name, param.annotation)
                 if annotation is inspect.Parameter.empty:
                     continue
 
                 if get_origin(annotation) is Annotated:
                     annotation = get_args(annotation)[0]
+
+                if param.default is not inspect.Parameter.empty and not self._is_registered(
+                    annotation
+                ):
+                    continue
 
                 dependencies.append(annotation)
 
