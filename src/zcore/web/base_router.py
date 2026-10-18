@@ -96,7 +96,8 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     def __init__(self) -> None:
         """Initialize the BaseRouter.
 
-        Performs fail-fast configuration checks and registers configured CRUD endpoints.
+        Performs fail-fast configuration checks, registers configured CRUD endpoints,
+        and binds auto-sorting hooks for subsequent custom routes.
 
         Raises:
             ValueError: If the required service parameter is not configured.
@@ -110,6 +111,25 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         self.exclude = self.exclude or set()
         self._validate_schema_configurations()
         self._register_routes()
+        self._bind_router_sorting_hooks()
+
+    def _bind_router_sorting_hooks(self) -> None:
+        """Bind hooks to auto-sort routes whenever new endpoints are registered."""
+        original_add_api_route = self.router.add_api_route
+        original_add_route = self.router.add_route
+
+        def wrapped_add_api_route(*args: Any, **kwargs: Any) -> Any:
+            result = original_add_api_route(*args, **kwargs)
+            self._sort_routes()
+            return result
+
+        def wrapped_add_route(*args: Any, **kwargs: Any) -> Any:
+            result = original_add_route(*args, **kwargs)
+            self._sort_routes()
+            return result
+
+        self.router.add_api_route = wrapped_add_api_route  # type: ignore[method-assign]
+        self.router.add_route = wrapped_add_route  # type: ignore[method-assign]
 
     def _resolve_pk_type(self) -> type[Any]:
         """Resolve the effective primary key type from explicit definition or model reflection.
@@ -366,6 +386,10 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                         message=f"Sort field '{s.field}' is not permitted in lookup queries."
                     )
 
+    def sort_routes(self) -> None:
+        """Sort routes using hierarchical specificity scoring to avoid path shadowing."""
+        self._sort_routes()
+
     def _sort_routes(self) -> None:
         """Sort routes using hierarchical specificity scoring to avoid path shadowing."""
 
@@ -388,6 +412,10 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             return (has_dynamic, total_dynamic, segment_scores, -len(segments))
 
         self.router.routes.sort(key=_route_specificity_key)
+
+    def register_custom_routes(self) -> None:
+        """Hook for subclasses to register custom domain endpoints before initial route sorting."""
+        pass
 
     def _register_routes(self) -> None:
         """Dynamically generate and bind endpoints to the APIRouter."""
@@ -566,6 +594,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 openapi_extra=self._get_openapi_extra(RouteKey.DELETE),
             )
 
+        self.register_custom_routes()
         self._sort_routes()
 
     async def create_endpoint(self, data_in: Any, service: BaseService) -> ResponseWrapper:

@@ -61,21 +61,6 @@ class RepoTestRepository(BaseRepository[RepoTestModel]):
         super().__init__(RepoTestModel, db)
 
 
-class DateCursorModel(Base):
-    __tablename__ = f"date_cursor_model_{uuid.uuid4().hex[:6]}"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    operation_date = Column(Date, nullable=False)
-
-
-class DateCursorCreateSchema(BaseModel):
-    operation_date: date
-
-
-class DateCursorRepository(BaseRepository[DateCursorModel]):
-    def __init__(self, db: Any) -> None:
-        super().__init__(DateCursorModel, db)
-
-
 class CompositePartitionModel(Base):
     __tablename__ = f"composite_part_model_{uuid.uuid4().hex[:6]}"
     id = Column(Integer, primary_key=True)
