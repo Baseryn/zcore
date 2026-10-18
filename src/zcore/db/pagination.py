@@ -251,9 +251,7 @@ class CursorPagination(BasePagination[T]):
             value = value.isoformat()
         elif isinstance(value, date):
             value = value.isoformat()
-        elif isinstance(value, uuid.UUID):
-            value = str(value)
-        elif isinstance(value, Decimal):
+        elif isinstance(value, (uuid.UUID, Decimal)):
             value = str(value)
 
         payload = {"value": value, "pk": str(getattr(last_item, pk_name, ""))}

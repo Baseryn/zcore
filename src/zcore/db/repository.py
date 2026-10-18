@@ -548,9 +548,7 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             sort_field = pagination.cursor_field or (
                 primary_sort.field if primary_sort else self.cursor_field
             )
-            sort_order = pagination.order or (
-                primary_sort.order if primary_sort else "desc"
-            )
+            sort_order = pagination.order or (primary_sort.order if primary_sort else "desc")
             paginator = CursorPagination(cursor_field=sort_field, order=sort_order)
         else:
             paginator = PageNumberPagination()
