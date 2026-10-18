@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.sqltypes import DateTime
+from sqlalchemy.sql.sqltypes import Date, DateTime
 
 from zcore.config import settings
 from zcore.exceptions.base import ValidationError
@@ -355,9 +355,9 @@ class CursorPagination(BasePagination[T]):
             if (col_type is datetime or isinstance(col.type, DateTime)) and isinstance(val, str):
                 with contextlib.suppress(ValueError):
                     val = datetime.fromisoformat(val)
-            elif col_type is date and isinstance(val, str):
+            elif (col_type is date or isinstance(col.type, Date)) and isinstance(val, str):
                 with contextlib.suppress(ValueError):
-                    val = date.fromisoformat(val)
+                    val = date.fromisoformat(val.split("T")[0])
             elif col_type is uuid.UUID and isinstance(val, str):
                 with contextlib.suppress(ValueError):
                     val = uuid.UUID(val)
