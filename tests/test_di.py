@@ -376,6 +376,15 @@ def test_auto_wire_injects_registered_dependency_even_with_default() -> None:
     assert resolved.service is registered
 
 
+def test_resolve_scoped_outside_scope_raises_di_exception() -> None:
+    container.register_scoped(IService, ServiceImpl)
+    assert _current_scope_id.get() is None
+    with pytest.raises(DIException, match="outside of an active scope"):
+        container.resolve(IService)
+    with pytest.raises(DIException, match="outside of an active scope"):
+        container.resolve(AsyncSession)
+
+
 def test_clear_scope_explicit() -> None:
     container.register_scoped(IService, ServiceImpl)
     scope_id = "test_clear"

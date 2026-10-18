@@ -25,6 +25,7 @@ from typing import (
 import structlog
 from anyio import to_thread
 from fastapi import Depends
+from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
@@ -154,6 +155,12 @@ class IoCContainer:
                 if current_instances is not None:
                     current_instances[interface] = resolved_instance
                 return resolved_instance
+        elif interface in self._scoped_definitions or (
+            inspect.isclass(interface) and issubclass(interface, AsyncSession)
+        ):
+            raise DIException(
+                f"Cannot resolve scoped dependency '{interface.__name__}' outside of an active scope."
+            )
 
         if interface in self._factories:
             return self._factories[interface](_stack)
@@ -195,6 +202,11 @@ class IoCContainer:
         if not inspect.isclass(target_class):
             return target_class
 
+        if issubclass(target_class, AsyncSession):
+            raise DIException(
+                f"Cannot auto-wire scoped dependency '{target_class.__name__}' outside of an active session scope."
+            )
+
         _stack = _stack or set()
         if target_class in _stack:
             chain = " -> ".join([c.__name__ for c in _stack]) + f" -> {target_class.__name__}"
@@ -206,7 +218,10 @@ class IoCContainer:
             if target_class in self._dependency_signature_cache:
                 dependencies = self._dependency_signature_cache[target_class]
                 resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
-                return target_class(*resolved_args)
+                instance = target_class(*resolved_args)
+                if issubclass(target_class, BaseSettings):
+                    self._singletons[target_class] = instance
+                return instance
 
             if target_class not in self._constructor_cache:
                 constructor = getattr(target_class, "__init__", None)
@@ -251,7 +266,10 @@ class IoCContainer:
             self._dependency_signature_cache[target_class] = dependencies
 
             resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
-            return target_class(*resolved_args)
+            instance = target_class(*resolved_args)
+            if issubclass(target_class, BaseSettings):
+                self._singletons[target_class] = instance
+            return instance
 
         finally:
             _stack.remove(target_class)
