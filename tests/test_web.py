@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
 from zcore.context.context import ZContext, ctx
-from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
+from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult, CursorPagination
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
 from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
@@ -83,6 +83,38 @@ class PrivateFieldModel(Zchema):
     name: str
     cost_price: float = 0.0
     internal_notes: str | None = None
+
+
+class SearchCursorItem(Zchema):
+    __model__ = "cursor_dummy"
+    id: str
+    code: int
+    tag: str
+
+
+class MockCursorSearchService:
+    def __init__(self) -> None:
+        self.items = [
+            SearchCursorItem(id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}")
+            for i in range(5)
+        ]
+
+    async def search(
+        self,
+        search_in: Any,
+        pagination: Any = None,
+        fields: Any = None,
+        options: Any = None,
+    ) -> Any:
+        order = search_in.sort[0].order if search_in.sort else "desc"
+        sorted_items = sorted(self.items, key=lambda x: x.code, reverse=(order == "desc"))
+        size = pagination.size if pagination else len(sorted_items)
+        data = sorted_items[:size]
+        has_more = len(sorted_items) > size
+        return PaginatedResult(
+            data=data,
+            meta={"next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None, "has_more": has_more, "size": size},
+        )
 
 
 class TargetService:
@@ -921,3 +953,66 @@ def test_zchema_private_fields_input_filtering_for_guest() -> None:
     assert "cost_price" not in filtered
     assert "internal_notes" not in filtered
     assert filtered["name"] == "ItemA"
+
+
+@pytest.mark.anyio
+async def test_router_search_with_cursor_pagination_and_sort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_add_api_route = APIRouter.add_api_route
+
+    def patched_add_api_route(
+        self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        return original_add_api_route(
+            self, path, clean_endpoint_signature(endpoint), *args, **kwargs
+        )
+
+    monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
+    app = FastAPI()
+
+    service_inst = MockCursorSearchService()
+    container.register_singleton(MockCursorSearchService, service_inst)
+
+    class CursorSearchRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = SearchCursorItem
+        service = MockCursorSearchService
+        prefix = "/cursor-search"
+        pagination_class = CursorPagination
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = CursorSearchRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        req_payload = {
+            "filters": [],
+            "sort": [{"field": "code", "order": "desc"}],
+            "size": 2,
+        }
+        res = await client.post("/cursor-search/search", json=req_payload)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert len(body["data"]) == 2
+        assert body["meta"]["has_more"] is True
+        assert body["meta"]["next_cursor"] is not None
+
+        next_cursor = body["meta"]["next_cursor"]
+        req_page2 = {
+            "filters": [],
+            "sort": [{"field": "code", "order": "desc"}],
+            "cursor": next_cursor,
+            "size": 2,
+        }
+        res_page2 = await client.post("/cursor-search/search", json=req_page2)
+        assert res_page2.status_code == 200
+        body2 = res_page2.json()
+        assert body2["success"] is True
+        assert len(body2["data"]) == 2

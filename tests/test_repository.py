@@ -452,3 +452,48 @@ async def test_delete_accepts_model_instance_directly(db_session: Any) -> None:
     assert deleted is not None
     assert deleted.id == item.id
     assert await repo.get(id=item.id) is None
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("order", ["desc", "asc"])
+async def test_repo_search_with_cursor_pagination_and_sort(
+    db_session: Any, order: str
+) -> None:
+    repo = RepoTestRepository(db_session)
+    for i in range(6):
+        await repo.create(
+            RepoTestCreateSchema(
+                name=f"Alpha_{i:02d}",
+                description=f"Desc_{(5 - i):02d}",
+            )
+        )
+
+    sort_field = "description"
+    search_req1 = SearchRequest(
+        filters=[],
+        sort=[{"field": sort_field, "order": order}],
+    )
+    cursor_params1 = CursorParams(size=3)
+
+    result_page1 = await repo.search(search_req1, pagination=cursor_params1)
+    assert len(result_page1.data) == 3
+    assert result_page1.meta["has_more"] is True
+    next_cursor = result_page1.meta["next_cursor"]
+    assert next_cursor is not None
+
+    search_req2 = SearchRequest(
+        filters=[],
+        sort=[{"field": sort_field, "order": order}],
+    )
+    cursor_params2 = CursorParams(size=3, cursor=next_cursor)
+
+    result_page2 = await repo.search(search_req2, pagination=cursor_params2)
+    assert len(result_page2.data) == 3
+    assert result_page2.meta["has_more"] is False
+
+    page1_ids = [item.id for item in result_page1.data]
+    page2_ids = [item.id for item in result_page2.data]
+    assert set(page1_ids).isdisjoint(set(page2_ids))
+
+    all_descriptions = [item.description for item in result_page1.data + result_page2.data]
+    expected_descriptions = sorted(all_descriptions, reverse=(order == "desc"))
+    assert all_descriptions == expected_descriptions
