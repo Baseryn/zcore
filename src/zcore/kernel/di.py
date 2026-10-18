@@ -49,6 +49,14 @@ class CircularDependencyError(DIException):
     pass
 
 
+class _DependencySignature(list[type[Any]]):
+    """Signature mapping preserving list-like inspection while caching parameter names."""
+
+    def __init__(self, kwargs_map: dict[str, type[Any]]) -> None:
+        super().__init__(kwargs_map.values())
+        self.kwargs_map: dict[str, type[Any]] = kwargs_map
+
+
 class IoCContainer:
     """Central Inversion of Control (IoC) container for dependency management.
 
@@ -71,7 +79,7 @@ class IoCContainer:
         self._factories: dict[type[Any], Callable[..., Any]] = {}
 
         self._constructor_cache: dict[type[Any], Callable[..., Any] | None] = {}
-        self._dependency_signature_cache: dict[type[Any], dict[str, type[Any]]] = {}
+        self._dependency_signature_cache: dict[type[Any], list[type[Any]]] = {}
 
     def is_registered(self, interface: type[Any]) -> bool:
         """Verify if a given interface or class is registered across any lifecycle store.
@@ -83,10 +91,14 @@ class IoCContainer:
             True if the interface has an active registration, False otherwise.
         """
         unwrapped = self._unwrap_type(interface)
+        current_instances = _scoped_instances.get()
+        in_active_scope = current_instances is not None and unwrapped in current_instances
         return (
             unwrapped in self._singletons
             or unwrapped in self._scoped_definitions
             or unwrapped in self._factories
+            or unwrapped is AsyncSession
+            or in_active_scope
         )
 
     @staticmethod
@@ -211,7 +223,7 @@ class IoCContainer:
         return self._auto_wire(target_type, _stack)
 
     def _auto_wire(self, target_class: type[T], _stack: set[type[Any]] | None = None) -> T:
-        """Analyze, resolve parameters, and construct a class instance via keyword mappings.
+        """Analyze, resolve parameters, and construct a class instance.
 
         Leverages constructor cache values and metadata reflection to construct targets.
         Utilizes `typing.get_type_hints` to resolve forward-references.
@@ -239,11 +251,15 @@ class IoCContainer:
 
         try:
             if target_class in self._dependency_signature_cache:
-                dependencies = self._dependency_signature_cache[target_class]
-                resolved_kwargs = {
-                    name: self.resolve(dep, _stack.copy()) for name, dep in dependencies.items()
-                }
-                return target_class(**resolved_kwargs)
+                cached_sig = self._dependency_signature_cache[target_class]
+                if isinstance(cached_sig, _DependencySignature):
+                    resolved_kwargs = {
+                        name: self.resolve(dep, _stack.copy())
+                        for name, dep in cached_sig.kwargs_map.items()
+                    }
+                    return target_class(**resolved_kwargs)
+                resolved_args = [self.resolve(dep, _stack.copy()) for dep in cached_sig]
+                return target_class(*resolved_args)
 
             if target_class not in self._constructor_cache:
                 constructor = getattr(target_class, "__init__", None)
@@ -252,7 +268,7 @@ class IoCContainer:
                 constructor = self._constructor_cache[target_class]
 
             if constructor is None or constructor is object.__init__:
-                self._dependency_signature_cache[target_class] = {}
+                self._dependency_signature_cache[target_class] = _DependencySignature({})
                 return target_class()
 
             try:
@@ -261,7 +277,7 @@ class IoCContainer:
                 type_hints = {}
 
             sig = inspect.signature(constructor)
-            dependencies: dict[str, type[Any]] = {}
+            dependencies_map: dict[str, type[Any]] = {}
 
             for name, param in sig.parameters.items():
                 if name == "self":
@@ -279,12 +295,13 @@ class IoCContainer:
                 if has_default and not self.is_registered(annotation):
                     continue
 
-                dependencies[name] = annotation
+                dependencies_map[name] = annotation
 
-            self._dependency_signature_cache[target_class] = dependencies
+            sig_entry = _DependencySignature(dependencies_map)
+            self._dependency_signature_cache[target_class] = sig_entry
 
             resolved_kwargs = {
-                name: self.resolve(dep, _stack.copy()) for name, dep in dependencies.items()
+                name: self.resolve(dep, _stack.copy()) for name, dep in sig_entry.kwargs_map.items()
             }
             return target_class(**resolved_kwargs)
 
