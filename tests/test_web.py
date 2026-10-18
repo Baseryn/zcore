@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
 from zcore.context.context import ZContext, ctx
-from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult, CursorPagination
+from zcore.db.pagination import (
+    CursorPagination,
+    PageNumberPagination,
+    PageNumberParams,
+    PaginatedResult,
+)
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
 from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
