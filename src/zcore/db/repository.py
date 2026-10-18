@@ -125,7 +125,7 @@ class AbstractRepository(Generic[ModelType]):
 
         if isinstance(target, (tuple, list)):
             if self.is_composite_pk:
-                return and_(*[col == val for col, val in zip(self.pks, target)])
+                return and_(*[col == val for col, val in zip(self.pks, target, strict=False)])
             return self.pks[0] == target[0]
 
         return self.pks[0] == target
@@ -448,7 +448,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                         row_payload[col.key] = key[col.key]
             elif isinstance(key, (tuple, list)) and self.is_composite_pk:
                 target_id = tuple(key)
-                for col, val in zip(self.pks, key):
+                for col, val in zip(self.pks, key, strict=False):
                     row_payload[col.key] = val
             else:
                 target_id = key
@@ -661,9 +661,7 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             sort_field = pagination.cursor_field or (
                 primary_sort.field if primary_sort else self.cursor_field
             )
-            sort_order = pagination.order or (
-                primary_sort.order if primary_sort else "desc"
-            )
+            sort_order = pagination.order or (primary_sort.order if primary_sort else "desc")
             paginator = CursorPagination(cursor_field=sort_field, order=sort_order)
         else:
             paginator = PageNumberPagination()
