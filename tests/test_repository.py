@@ -61,6 +61,43 @@ class RepoTestRepository(BaseRepository[RepoTestModel]):
         super().__init__(RepoTestModel, db)
 
 
+class DateCursorModel(Base):
+    __tablename__ = f"date_cursor_model_{uuid.uuid4().hex[:6]}"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_date = Column(Date, nullable=False)
+
+
+class DateCursorCreateSchema(BaseModel):
+    operation_date: date
+
+
+class DateCursorRepository(BaseRepository[DateCursorModel]):
+    def __init__(self, db: Any) -> None:
+        super().__init__(DateCursorModel, db)
+
+
+class CompositePartitionModel(Base):
+    __tablename__ = f"composite_part_model_{uuid.uuid4().hex[:6]}"
+    id = Column(Integer, primary_key=True)
+    operation_date = Column(Date, primary_key=True)
+    message = Column(String, nullable=False)
+
+
+class CompositeCreateSchema(BaseModel):
+    id: int
+    operation_date: date
+    message: str
+
+
+class CompositeUpdateSchema(BaseModel):
+    message: str
+
+
+class CompositeRepository(BaseRepository[CompositePartitionModel]):
+    def __init__(self, db: Any) -> None:
+        super().__init__(CompositePartitionModel, db)
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def setup_test_tables(test_engine: Any) -> AsyncGenerator[None, None]:
     async with test_engine.begin() as conn:
@@ -469,11 +506,10 @@ async def test_delete_accepts_model_instance_directly(db_session: Any) -> None:
     assert deleted.id == item.id
     assert await repo.get(id=item.id) is None
 
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("order", ["desc", "asc"])
-async def test_repo_search_with_cursor_pagination_and_sort(
-    db_session: Any, order: str
-) -> None:
+async def test_repo_search_with_cursor_pagination_and_sort(db_session: Any, order: str) -> None:
     repo = RepoTestRepository(db_session)
     for i in range(6):
         await repo.create(
@@ -519,9 +555,7 @@ async def test_repo_search_with_cursor_pagination_and_sort(
 async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any) -> None:
     repo = DateCursorRepository(db_session)
     for i in range(5):
-        await repo.create(
-            DateCursorCreateSchema(operation_date=date(2026, 10, 10 + i))
-        )
+        await repo.create(DateCursorCreateSchema(operation_date=date(2026, 10, 10 + i)))
 
     params1 = CursorParams(size=2, cursor_field="operation_date", order="desc")
     res1 = await repo.get_list(pagination=params1)
@@ -530,9 +564,7 @@ async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any)
     next_cursor = res1.meta["next_cursor"]
     assert next_cursor is not None
 
-    params2 = CursorParams(
-        size=2, cursor=next_cursor, cursor_field="operation_date", order="desc"
-    )
+    params2 = CursorParams(size=2, cursor=next_cursor, cursor_field="operation_date", order="desc")
     res2 = await repo.get_list(pagination=params2)
     assert len(res2.data) == 2
     assert res2.meta["has_more"] is True
@@ -542,3 +574,80 @@ async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any)
     assert all(isinstance(d, date) for d in first_page_dates + second_page_dates)
     assert set(first_page_dates).isdisjoint(set(second_page_dates))
     assert first_page_dates[0] > second_page_dates[0]
+
+
+@pytest.mark.anyio
+async def test_repo_composite_guarded_properties(db_session: Any) -> None:
+    single_repo = RepoTestRepository(db_session)
+    assert single_repo.is_composite_pk is False
+    assert single_repo.pk is not None
+    assert single_repo.pk_name == "id"
+
+    comp_repo = CompositeRepository(db_session)
+    assert comp_repo.is_composite_pk is True
+    assert comp_repo.pk_names == ("id", "operation_date")
+
+    with pytest.raises(AttributeError) as exc_pk:
+        _ = comp_repo.pk
+    assert "composite primary key" in str(exc_pk.value)
+
+    with pytest.raises(AttributeError) as exc_pk_name:
+        _ = comp_repo.pk_name
+    assert "composite primary key" in str(exc_pk_name.value)
+
+
+@pytest.mark.anyio
+async def test_repo_composite_primary_key_crud(db_session: Any) -> None:
+    repo = CompositeRepository(db_session)
+    assert repo.is_composite_pk is True
+    assert repo.pk_names == ("id", "operation_date")
+
+    d1 = date(2026, 10, 18)
+    d2 = date(2026, 10, 19)
+
+    item1 = await repo.create(CompositeCreateSchema(id=1, operation_date=d1, message="First"))
+    item2 = await repo.create(CompositeCreateSchema(id=2, operation_date=d2, message="Second"))
+
+    assert await repo.exist(id=1, operation_date=d1) is True
+    assert await repo.exist(id=99, operation_date=d1) is False
+
+    fetched_by_tuple = await repo.get(repo._build_pk_condition((1, d1)))
+    assert fetched_by_tuple is not None
+    assert fetched_by_tuple.message == "First"
+
+    fetched_by_dict = await repo.get(repo._build_pk_condition({"id": 2, "operation_date": d2}))
+    assert fetched_by_dict is not None
+    assert fetched_by_dict.message == "Second"
+
+    by_ids_tuples = await repo.get_by_ids([(1, d1), (2, d2)])
+    assert len(by_ids_tuples) == 2
+
+    by_ids_dicts = await repo.get_by_ids(
+        [{"id": 1, "operation_date": d1}, {"id": 2, "operation_date": d2}]
+    )
+    assert len(by_ids_dicts) == 2
+
+    by_ids_models = await repo.get_by_ids([item1, item2])
+    assert len(by_ids_models) == 2
+
+    updated = await repo.update((1, d1), CompositeUpdateSchema(message="Updated First"))
+    assert updated is not None
+    assert updated.message == "Updated First"
+
+    updated_items = await repo.update_multi(
+        {
+            (1, d1): CompositeUpdateSchema(message="Multi 1"),
+            (2, d2): CompositeUpdateSchema(message="Multi 2"),
+        }
+    )
+    assert len(updated_items) == 2
+    refreshed1 = await repo.get(repo._build_pk_condition((1, d1)))
+    assert refreshed1 is not None and refreshed1.message == "Multi 1"
+
+    deleted = await repo.delete((1, d1))
+    assert deleted is not None
+    assert await repo.get(repo._build_pk_condition((1, d1))) is None
+
+    deleted_multi = await repo.delete_multi([(2, d2)])
+    assert len(deleted_multi) == 1
+    assert await repo.get(repo._build_pk_condition((2, d2))) is None

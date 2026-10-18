@@ -100,7 +100,9 @@ class SearchCursorItem(Zchema):
 class MockCursorSearchService:
     def __init__(self) -> None:
         self.items = [
-            SearchCursorItem(id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}")
+            SearchCursorItem(
+                id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}"
+            )
             for i in range(5)
         ]
 
@@ -118,7 +120,11 @@ class MockCursorSearchService:
         has_more = len(sorted_items) > size
         return PaginatedResult(
             data=data,
-            meta={"next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None, "has_more": has_more, "size": size},
+            meta={
+                "next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None,
+                "has_more": has_more,
+                "size": size,
+            },
         )
 
 
