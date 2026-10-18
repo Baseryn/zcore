@@ -637,7 +637,14 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             effective_size = min(search_in.size or default_size, max_size)
 
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(cursor=search_in.cursor, size=effective_size)
+                sort_field = search_in.sort[0].field if search_in.sort else None
+                sort_order = search_in.sort[0].order if search_in.sort else None
+                pagination = CursorParams(
+                    cursor=search_in.cursor,
+                    size=effective_size,
+                    cursor_field=sort_field,
+                    order=sort_order,
+                )
             else:
                 pagination = PageNumberParams(page=search_in.page, size=effective_size)
 
@@ -679,8 +686,16 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         if self.pagination_class:
             from zcore.db.pagination import CursorParams, PageNumberParams
 
+            sort_field = search_in.sort[0].field if search_in.sort else None
+            sort_order = search_in.sort[0].order if search_in.sort else None
+
             if self.pagination_class.params_class == CursorParams:
-                pagination = CursorParams(cursor=search_in.cursor, size=search_in.size)
+                pagination = CursorParams(
+                    cursor=search_in.cursor,
+                    size=search_in.size,
+                    cursor_field=sort_field,
+                    order=sort_order,
+                )
             else:
                 pagination = PageNumberParams(page=search_in.page, size=search_in.size)
 

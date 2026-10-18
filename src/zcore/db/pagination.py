@@ -11,7 +11,8 @@ import contextlib
 import math
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
@@ -87,10 +88,14 @@ class CursorParams(BaseModel):
         cursor: The base64-encoded keyset cursor string specifying position context.
             If None, fetches from the beginning. Defaults to None.
         size: The maximum quantity of records to yield in the dataset.
+        cursor_field: Target column name used for keyset boundary evaluation. Defaults to None.
+        order: Target sorting order applied during keyset boundary traversal. Defaults to None.
     """
 
     cursor: str | None = None
     size: int | None = None
+    cursor_field: str | None = None
+    order: Literal["asc", "desc"] | str | None = None
 
     @model_validator(mode="after")
     def _validate_and_bound_size(self) -> "CursorParams":
@@ -227,7 +232,7 @@ class CursorPagination(BasePagination[T]):
             order: The sorting order ('asc' or 'desc'). Defaults to "desc".
         """
         self.cursor_field = cursor_field
-        self.order = order.lower()
+        self.order = order.lower() if order else "desc"
 
     def _encode_cursor(self, last_item: Any, cursor_field: str, pk_name: str) -> str:
         """Serialize and encode an entity's coordinate parameters to base64.
@@ -244,6 +249,12 @@ class CursorPagination(BasePagination[T]):
         if isinstance(value, datetime):
             value = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
             value = value.isoformat()
+        elif isinstance(value, date):
+            value = value.isoformat()
+        elif isinstance(value, uuid.UUID):
+            value = str(value)
+        elif isinstance(value, Decimal):
+            value = str(value)
 
         payload = {"value": value, "pk": str(getattr(last_item, pk_name, ""))}
 
@@ -310,7 +321,9 @@ class CursorPagination(BasePagination[T]):
         mapper = inspect(model)
         pk_col = mapper.primary_key[0]
         pk_name = pk_col.name
-        effective_cursor_field = self.cursor_field or pk_name
+
+        effective_cursor_field = params.cursor_field or self.cursor_field or pk_name
+        effective_order = (params.order or self.order or "desc").lower()
 
         valid_columns = {col.key for col in mapper.columns}
         if effective_cursor_field not in valid_columns:
@@ -336,22 +349,41 @@ class CursorPagination(BasePagination[T]):
                 with contextlib.suppress(ValueError):
                     last_pk = uuid.UUID(last_pk)
 
-            if isinstance(col.type, DateTime) and isinstance(val, str):
+            try:
+                col_type = getattr(col.type, "python_type", None)
+            except (NotImplementedError, AttributeError):
+                col_type = None
+
+            if (col_type is datetime or isinstance(col.type, DateTime)) and isinstance(val, str):
                 with contextlib.suppress(ValueError):
                     val = datetime.fromisoformat(val)
+            elif col_type is date and isinstance(val, str):
+                with contextlib.suppress(ValueError):
+                    val = date.fromisoformat(val)
+            elif col_type is uuid.UUID and isinstance(val, str):
+                with contextlib.suppress(ValueError):
+                    val = uuid.UUID(val)
+            elif col_type is int and isinstance(val, str):
+                with contextlib.suppress(ValueError):
+                    val = int(val)
+            elif col_type is float and isinstance(val, str):
+                with contextlib.suppress(ValueError):
+                    val = float(val)
 
             if effective_cursor_field == pk_name:
-                query = query.where(col < val if self.order == "desc" else col > val)
+                query = query.where(col < val if effective_order == "desc" else col > val)
             else:
-                if self.order == "desc":
+                if effective_order == "desc":
                     query = query.where(or_(col < val, and_(col == val, pk_col < last_pk)))
                 else:
                     query = query.where(or_(col > val, and_(col == val, pk_col > last_pk)))
 
+        query = query.order_by(None)
+
         if effective_cursor_field == pk_name:
-            query = query.order_by(col.desc() if self.order == "desc" else col.asc())
+            query = query.order_by(col.desc() if effective_order == "desc" else col.asc())
         else:
-            if self.order == "desc":
+            if effective_order == "desc":
                 query = query.order_by(col.desc(), pk_col.desc())
             else:
                 query = query.order_by(col.asc(), pk_col.asc())

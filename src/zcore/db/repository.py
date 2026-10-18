@@ -197,7 +197,10 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
             return result.scalars().all()
 
         paginator = (
-            CursorPagination(self.cursor_field)
+            CursorPagination(
+                cursor_field=getattr(pagination, "cursor_field", None) or self.cursor_field,
+                order=getattr(pagination, "order", None) or "desc",
+            )
             if isinstance(pagination, CursorParams)
             else PageNumberPagination()
         )
@@ -540,11 +543,18 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             result = await self.db.execute(query)
             return result.scalars().all()
 
-        paginator = (
-            CursorPagination(self.cursor_field)
-            if isinstance(pagination, CursorParams)
-            else PageNumberPagination()
-        )
+        if isinstance(pagination, CursorParams):
+            primary_sort = search_in.sort[0] if search_in.sort else None
+            sort_field = pagination.cursor_field or (
+                primary_sort.field if primary_sort else self.cursor_field
+            )
+            sort_order = pagination.order or (
+                primary_sort.order if primary_sort else "desc"
+            )
+            paginator = CursorPagination(cursor_field=sort_field, order=sort_order)
+        else:
+            paginator = PageNumberPagination()
+
         return await paginator.paginate(self.db, query, pagination, self.model)
 
 
