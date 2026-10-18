@@ -1027,3 +1027,80 @@ async def test_router_search_with_cursor_pagination_and_sort(
         body2 = res_page2.json()
         assert body2["success"] is True
         assert len(body2["data"]) == 2
+
+
+@pytest.mark.anyio
+async def test_subclassed_router_custom_route_in_init_avoids_shadowing() -> None:
+    class DummyService:
+        pass
+
+    class SubclassedInitRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/items-init"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.router.add_api_route("/summary", self.summary_endpoint, methods=["GET"])
+
+        async def summary_endpoint(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = SubclassedInitRouter()
+    paths = [route.path for route in r.router.routes]
+    idx_summary = paths.index("/items-init/summary")
+    idx_uuid = paths.index("/items-init/{id:uuid}")
+    assert idx_summary < idx_uuid
+
+    app = FastAPI()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/items-init/summary")
+        assert res.status_code == 200
+        assert res.json() == {"ok": True}
+
+
+@pytest.mark.anyio
+async def test_subclassed_router_hook_register_custom_routes() -> None:
+    class DummyService:
+        pass
+
+    class SubclassedHookRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/items-hook"
+
+        def register_custom_routes(self) -> None:
+            self.router.add_api_route("/reports", self.reports_endpoint, methods=["GET"])
+
+        async def reports_endpoint(self) -> dict[str, str]:
+            return {"report": "generated"}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = SubclassedHookRouter()
+    paths = [route.path for route in r.router.routes]
+    idx_reports = paths.index("/items-hook/reports")
+    idx_uuid = paths.index("/items-hook/{id:uuid}")
+    assert idx_reports < idx_uuid
+
+    app = FastAPI()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/items-hook/reports")
+        assert res.status_code == 200
+        assert res.json() == {"report": "generated"}
