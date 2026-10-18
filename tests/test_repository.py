@@ -494,9 +494,7 @@ async def test_delete_accepts_model_instance_directly(db_session: Any) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("order", ["desc", "asc"])
-async def test_repo_search_with_cursor_pagination_and_sort(
-    db_session: Any, order: str
-) -> None:
+async def test_repo_search_with_cursor_pagination_and_sort(db_session: Any, order: str) -> None:
     repo = RepoTestRepository(db_session)
     for i in range(6):
         await repo.create(
@@ -542,9 +540,7 @@ async def test_repo_search_with_cursor_pagination_and_sort(
 async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any) -> None:
     repo = DateCursorRepository(db_session)
     for i in range(5):
-        await repo.create(
-            DateCursorCreateSchema(operation_date=date(2026, 10, 10 + i))
-        )
+        await repo.create(DateCursorCreateSchema(operation_date=date(2026, 10, 10 + i)))
 
     params1 = CursorParams(size=2, cursor_field="operation_date", order="desc")
     res1 = await repo.get_list(pagination=params1)
@@ -553,9 +549,7 @@ async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any)
     next_cursor = res1.meta["next_cursor"]
     assert next_cursor is not None
 
-    params2 = CursorParams(
-        size=2, cursor=next_cursor, cursor_field="operation_date", order="desc"
-    )
+    params2 = CursorParams(size=2, cursor=next_cursor, cursor_field="operation_date", order="desc")
     res2 = await repo.get_list(pagination=params2)
     assert len(res2.data) == 2
     assert res2.meta["has_more"] is True
@@ -596,12 +590,8 @@ async def test_repo_composite_primary_key_crud(db_session: Any) -> None:
     d1 = date(2026, 10, 18)
     d2 = date(2026, 10, 19)
 
-    item1 = await repo.create(
-        CompositeCreateSchema(id=1, operation_date=d1, message="First")
-    )
-    item2 = await repo.create(
-        CompositeCreateSchema(id=2, operation_date=d2, message="Second")
-    )
+    item1 = await repo.create(CompositeCreateSchema(id=1, operation_date=d1, message="First"))
+    item2 = await repo.create(CompositeCreateSchema(id=2, operation_date=d2, message="Second"))
 
     assert await repo.exist(id=1, operation_date=d1) is True
     assert await repo.exist(id=99, operation_date=d1) is False
@@ -610,9 +600,7 @@ async def test_repo_composite_primary_key_crud(db_session: Any) -> None:
     assert fetched_by_tuple is not None
     assert fetched_by_tuple.message == "First"
 
-    fetched_by_dict = await repo.get(
-        repo._build_pk_condition({"id": 2, "operation_date": d2})
-    )
+    fetched_by_dict = await repo.get(repo._build_pk_condition({"id": 2, "operation_date": d2}))
     assert fetched_by_dict is not None
     assert fetched_by_dict.message == "Second"
 
@@ -627,9 +615,7 @@ async def test_repo_composite_primary_key_crud(db_session: Any) -> None:
     by_ids_models = await repo.get_by_ids([item1, item2])
     assert len(by_ids_models) == 2
 
-    updated = await repo.update(
-        (1, d1), CompositeUpdateSchema(message="Updated First")
-    )
+    updated = await repo.update((1, d1), CompositeUpdateSchema(message="Updated First"))
     assert updated is not None
     assert updated.message == "Updated First"
 

@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
 from zcore.context.context import ZContext, ctx
-from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult, CursorPagination
+from zcore.db.pagination import (
+    CursorPagination,
+    PageNumberPagination,
+    PageNumberParams,
+    PaginatedResult,
+)
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
 from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
@@ -95,7 +100,9 @@ class SearchCursorItem(Zchema):
 class MockCursorSearchService:
     def __init__(self) -> None:
         self.items = [
-            SearchCursorItem(id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}")
+            SearchCursorItem(
+                id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}"
+            )
             for i in range(5)
         ]
 
@@ -113,7 +120,11 @@ class MockCursorSearchService:
         has_more = len(sorted_items) > size
         return PaginatedResult(
             data=data,
-            meta={"next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None, "has_more": has_more, "size": size},
+            meta={
+                "next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None,
+                "has_more": has_more,
+                "size": size,
+            },
         )
 
 
