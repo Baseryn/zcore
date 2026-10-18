@@ -376,6 +376,18 @@ def test_auto_wire_injects_registered_dependency_even_with_default() -> None:
     assert resolved.service is registered
 
 
+def test_auto_wire_injects_registered_dependency_with_optional_union() -> None:
+    registered = AnotherServiceImpl()
+    container.register_singleton(IService, registered)
+    resolved = container.resolve(ServiceWithRegisteredDefault)
+    assert resolved.service is registered
+
+
+def test_auto_wire_skips_unregistered_optional_union() -> None:
+    resolved = container.resolve(ServiceWithRegisteredDefault)
+    assert resolved.service is None
+
+
 def test_resolve_scoped_outside_scope_raises_di_exception() -> None:
     container.register_scoped(IService, ServiceImpl)
     assert _current_scope_id.get() is None
