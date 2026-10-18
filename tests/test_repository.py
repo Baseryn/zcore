@@ -3,6 +3,8 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from datetime import date
+from sqlalchemy import Date
 import pytest
 import pytest_asyncio
 from pydantic import BaseModel
@@ -38,6 +40,21 @@ class RepoTestCreateSchema(BaseModel):
 class RepoTestUpdateSchema(BaseModel):
     name: str | None = None
     description: str | None = None
+
+
+class DateCursorModel(Base):
+    __tablename__ = f"date_cursor_model_{uuid.uuid4().hex[:6]}"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_date = Column(Date, nullable=False)
+
+
+class DateCursorCreateSchema(BaseModel):
+    operation_date: date
+
+
+class DateCursorRepository(BaseRepository[DateCursorModel]):
+    def __init__(self, db: Any) -> None:
+        super().__init__(DateCursorModel, db)
 
 
 class RepoTestRepository(BaseRepository[RepoTestModel]):
@@ -497,3 +514,32 @@ async def test_repo_search_with_cursor_pagination_and_sort(
     all_descriptions = [item.description for item in result_page1.data + result_page2.data]
     expected_descriptions = sorted(all_descriptions, reverse=(order == "desc"))
     assert all_descriptions == expected_descriptions
+
+
+@pytest.mark.anyio
+async def test_repo_cursor_pagination_with_date_column_coercion(db_session: Any) -> None:
+    repo = DateCursorRepository(db_session)
+    for i in range(5):
+        await repo.create(
+            DateCursorCreateSchema(operation_date=date(2026, 10, 10 + i))
+        )
+
+    params1 = CursorParams(size=2, cursor_field="operation_date", order="desc")
+    res1 = await repo.get_list(pagination=params1)
+    assert len(res1.data) == 2
+    assert res1.meta["has_more"] is True
+    next_cursor = res1.meta["next_cursor"]
+    assert next_cursor is not None
+
+    params2 = CursorParams(
+        size=2, cursor=next_cursor, cursor_field="operation_date", order="desc"
+    )
+    res2 = await repo.get_list(pagination=params2)
+    assert len(res2.data) == 2
+    assert res2.meta["has_more"] is True
+
+    first_page_dates = [item.operation_date for item in res1.data]
+    second_page_dates = [item.operation_date for item in res2.data]
+    assert all(isinstance(d, date) for d in first_page_dates + second_page_dates)
+    assert set(first_page_dates).isdisjoint(set(second_page_dates))
+    assert first_page_dates[0] > second_page_dates[0]
