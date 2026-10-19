@@ -38,7 +38,6 @@ class AbstractRepository(Generic[ModelType]):
         pks: Tuple of primary key column representations of the bound model.
         pk_names: Tuple of primary key column names.
         is_composite_pk: Flag indicating if the model has a composite primary key.
-        cursor_field: The field name to utilize during keyset pagination lookups.
     """
 
     db: AsyncSession
@@ -46,7 +45,7 @@ class AbstractRepository(Generic[ModelType]):
     pks: tuple[Any, ...]
     pk_names: tuple[str, ...]
     is_composite_pk: bool
-    cursor_field: str
+    _cursor_field: str | None = None
 
     @property
     def pk(self) -> Any:
@@ -75,6 +74,31 @@ class AbstractRepository(Generic[ModelType]):
                 "Access 'self.pk_names' instead of 'self.pk_name'."
             )
         return self.pk_names[0]
+
+    @property
+    def cursor_field(self) -> str:
+        """Resolve the default cursor coordinate field.
+
+        Returns:
+            The explicitly configured cursor field or the single primary key column name.
+
+        Raises:
+            AttributeError: If invoked on a composite model without an explicit cursor field.
+        """
+        if self._cursor_field is not None:
+            return self._cursor_field
+
+        if self.is_composite_pk:
+            raise AttributeError(
+                f"Model '{self.model.__name__}' has a composite primary key {self.pk_names}. "
+                "Explicitly set 'self.cursor_field' on the repository or provide sorting criteria in requests."
+            )
+
+        return self.pk_names[0]
+
+    @cursor_field.setter
+    def cursor_field(self, value: str | None) -> None:
+        self._cursor_field = value
 
     def _get_base_query(self) -> Select:
         """Construct the initial select statement for query operations.
@@ -116,17 +140,48 @@ class AbstractRepository(Generic[ModelType]):
 
         Returns:
             SQLAlchemy binary expression or compound `and_` expression matching target primary key.
+
+        Raises:
+            ValueError: If target values do not conform to expected primary key structures.
         """
         if isinstance(target, self.model):
             return and_(*[col == getattr(target, col.key) for col in self.pks])
 
         if isinstance(target, dict):
-            return and_(*[col == target[col.key] for col in self.pks if col.key in target])
+            if self.is_composite_pk:
+                missing = [
+                    col.key for col in self.pks if col.key not in target and col.name not in target
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Incomplete composite primary key mapping for '{self.model.__name__}'. "
+                        f"Missing required key fields: {missing}"
+                    )
+                return and_(*[col == target.get(col.key, target.get(col.name)) for col in self.pks])
+
+            if self.pk_names[0] in target:
+                return self.pks[0] == target[self.pk_names[0]]
+            if self.pks[0].key in target:
+                return self.pks[0] == target[self.pks[0].key]
+            raise ValueError(
+                f"Missing required primary key '{self.pk_names[0]}' in mapping for '{self.model.__name__}'."
+            )
 
         if isinstance(target, (tuple, list)):
             if self.is_composite_pk:
-                return and_(*[col == val for col, val in zip(self.pks, target, strict=False)])
+                if len(target) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key tuple for '{self.model.__name__}' requires "
+                        f"{len(self.pks)} values ({self.pk_names}), received {len(target)}."
+                    )
+                return and_(*[col == val for col, val in zip(self.pks, target, strict=True)])
             return self.pks[0] == target[0]
+
+        if self.is_composite_pk:
+            raise ValueError(
+                f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                f"Target lookup must be a model instance, mapping, or tuple/list, received scalar: {target!r}"
+            )
 
         return self.pks[0] == target
 
@@ -138,12 +193,15 @@ class AbstractRepository(Generic[ModelType]):
 
         Returns:
             SQLAlchemy filter expression resolving scalar `in_` or composite `tuple_.in_`.
+
+        Raises:
+            ValueError: If items in ids do not conform to the model's primary key signature.
         """
         if not self.is_composite_pk:
             normalized_scalars = [
-                getattr(item, self.pk_names[0])
+                getattr(item, self.pks[0].key)
                 if isinstance(item, self.model)
-                else item.get(self.pk_names[0])
+                else item.get(self.pk_names[0], item.get(self.pks[0].key))
                 if isinstance(item, dict)
                 else item[0]
                 if isinstance(item, (tuple, list))
@@ -157,11 +215,29 @@ class AbstractRepository(Generic[ModelType]):
             if isinstance(item, self.model):
                 normalized_tuples.append(tuple(getattr(item, col.key) for col in self.pks))
             elif isinstance(item, dict):
-                normalized_tuples.append(tuple(item[col.key] for col in self.pks))
+                missing = [
+                    col.key for col in self.pks if col.key not in item and col.name not in item
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Incomplete composite key item in batch for '{self.model.__name__}'. "
+                        f"Missing required fields: {missing}"
+                    )
+                normalized_tuples.append(
+                    tuple(item.get(col.key, item.get(col.name)) for col in self.pks)
+                )
             elif isinstance(item, (tuple, list)):
+                if len(item) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key item requires {len(self.pks)} values ({self.pk_names}), "
+                        f"received {len(item)}: {item}."
+                    )
                 normalized_tuples.append(tuple(item))
             else:
-                normalized_tuples.append((item,))
+                raise ValueError(
+                    f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                    f"Batch items must be tuples, dicts, or model instances, received scalar: {item!r}"
+                )
 
         return tuple_(*self.pks).in_(normalized_tuples)
 
@@ -438,19 +514,39 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
                 for col in self.pks:
                     row_payload[col.key] = getattr(key, col.key)
             elif isinstance(key, dict):
-                target_id = (
-                    tuple(key[col.key] for col in self.pks)
-                    if self.is_composite_pk
-                    else key.get(self.pk_names[0])
-                )
-                for col in self.pks:
-                    if col.key in key:
-                        row_payload[col.key] = key[col.key]
+                if self.is_composite_pk:
+                    missing = [
+                        col.key
+                        for col in self.pks
+                        if col.key not in key and col.name not in key
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"Incomplete composite primary key mapping in update_multi for '{self.model.__name__}'. "
+                            f"Missing fields: {missing}"
+                        )
+                    target_id = tuple(key.get(col.key, key.get(col.name)) for col in self.pks)
+                    for col in self.pks:
+                        row_payload[col.key] = key.get(col.key, key.get(col.name))
+                else:
+                    pk_k = self.pk_names[0] if self.pk_names[0] in key else self.pks[0].key
+                    target_id = key.get(pk_k)
+                    row_payload[self.pk_names[0]] = target_id
             elif isinstance(key, (tuple, list)) and self.is_composite_pk:
+                if len(key) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key tuple in update_multi requires {len(self.pks)} values ({self.pk_names}), "
+                        f"received {len(key)}."
+                    )
                 target_id = tuple(key)
-                for col, val in zip(self.pks, key, strict=False):
+                for col, val in zip(self.pks, key, strict=True):
                     row_payload[col.key] = val
             else:
+                if self.is_composite_pk:
+                    raise ValueError(
+                        f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                        f"Update target must be a tuple, dict, or model instance, received scalar: {key!r}"
+                    )
                 target_id = key
                 row_payload[self.pk_names[0]] = key
 
@@ -690,4 +786,4 @@ class BaseRepository(
         self.pks = tuple(mapper.primary_key)
         self.pk_names = tuple(col.name for col in self.pks)
         self.is_composite_pk = len(self.pks) > 1
-        self.cursor_field = self.pk_names[0]
+        self._cursor_field = None
