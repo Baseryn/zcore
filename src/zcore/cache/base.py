@@ -8,6 +8,7 @@ spawns background memory eviction routines safely within active event loops base
 
 import asyncio
 import contextlib
+import threading
 from typing import Any, Generic, TypeVar
 
 import structlog
@@ -29,6 +30,7 @@ except ImportError:
 
 _shared_redis_client: Any | None = None
 _eviction_task: asyncio.Task | None = None
+_lock = threading.Lock()
 
 
 def _ensure_eviction_task(interval: int | None = None) -> None:
@@ -43,7 +45,11 @@ def _ensure_eviction_task(interval: int | None = None) -> None:
     try:
         loop = asyncio.get_running_loop()
         if _eviction_task is None or _eviction_task.done():
-            _eviction_task = loop.create_task(_start_eviction_loop(interval=effective_interval))
+            with _lock:
+                if _eviction_task is None or _eviction_task.done():
+                    _eviction_task = loop.create_task(
+                        _start_eviction_loop(interval=effective_interval)
+                    )
     except RuntimeError:
         pass
 
@@ -89,11 +95,16 @@ async def close_cache() -> None:
     """Cancel background loops and cleanly close distributed connections."""
     global _shared_redis_client, _eviction_task
 
-    if _eviction_task and not _eviction_task.done():
-        _eviction_task.cancel()
+    task_to_cancel = None
+    with _lock:
+        if _eviction_task and not _eviction_task.done():
+            task_to_cancel = _eviction_task
+            _eviction_task = None
+
+    if task_to_cancel:
+        task_to_cancel.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await _eviction_task
-        _eviction_task = None
+            await task_to_cancel
         logger.debug("Cache memory eviction loop stopped.")
 
     if _shared_redis_client:
