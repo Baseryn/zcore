@@ -1,6 +1,8 @@
+import asyncio
 import gc
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -321,3 +323,30 @@ def test_dynamic_cache_configuration_bindings() -> None:
         base_cache = BaseCache[str](prefix="dynamic")
         assert base_cache._local_cache.maxsize == 42
         assert base_cache.default_ttl == 123
+
+
+@pytest.mark.anyio
+async def test_concurrent_ensure_eviction_task_single_instance() -> None:
+    await close_cache()
+
+    loop = asyncio.get_running_loop()
+
+    def call_ensure() -> None:
+        loop.call_soon_threadsafe(_ensure_eviction_task)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(call_ensure) for _ in range(20)]
+        for f in futures:
+            f.result()
+
+    await asyncio.sleep(0.05)
+
+    assert base_module._eviction_task is not None
+    assert not base_module._eviction_task.done()
+
+    initial_task = base_module._eviction_task
+    _ensure_eviction_task()
+    assert base_module._eviction_task is initial_task
+
+    await close_cache()
+    assert base_module._eviction_task is None
