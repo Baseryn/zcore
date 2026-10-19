@@ -8,6 +8,7 @@ from pathlib import Path
 import questionary
 from questionary import Choice
 
+from zcore import __version__
 from zcore.cli.commands import (
     DB_DRIVERS,
     find_zcore_projects,
@@ -366,7 +367,7 @@ def main() -> None:
 
         if args.version:
             console.print(
-                f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]0.1.0-rc.2[/bold white]"
+                f"[bold {ZCORE_PRIMARY}]ZCore Framework[/bold {ZCORE_PRIMARY}] - Version [bold white]{__version__}[/bold white]"
             )
             sys.exit(0)
 
