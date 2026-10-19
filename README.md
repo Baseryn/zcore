@@ -273,7 +273,7 @@ ZCore includes an interactive terminal user interface (TUI) powered by Questiona
 ```text
 $ zc
 
-⚡ ZCore Framework v0.1.0-rc.2 • Modern Modular Monolith
+⚡ ZCore Framework v0.1.0-rc.3 • Modern Modular Monolith
  FastAPI • SQLAlchemy 2.0 • Pydantic V2
 
 ? What framework task would you like to perform? 
@@ -298,9 +298,9 @@ $ zc
 
 ---
 
-## 📢 Community Testing & Feedback (Release Candidate `rc.2`)
+## 📢 Community Testing & Feedback (Release Candidate `rc.3`)
 
-We are currently validating **`v0.1.0-rc.2`** before tagging the official `v1.0.0` stable release. 
+We are currently validating **`v0.1.0-rc.3`** before tagging the official `v1.0.0` stable release. 
 
 We built ZCore to solve architectural pain points we faced in production. Before declaring the API stable, **we need your critical engineering feedback:**
 

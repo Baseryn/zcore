@@ -5,7 +5,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
-from zcore import Kernel, db_manager, register_db_event_dispatcher, register_exception_handlers, settings
+from zcore import (
+    Kernel,
+    __version__,
+    db_manager,
+    register_db_event_dispatcher,
+    register_exception_handlers,
+    settings,
+)
 from zcore.logging import setup_logging
 from zcore.web import RequestLogMiddleware, ScopedDependencyMiddleware
 
@@ -33,7 +40,7 @@ async def root():
     return {
         "status": "healthy",
         "framework": "ZCore",
-        "version": "0.1.0-rc.2",
+        "version": __version__,
         "debug": settings.DEBUG
     }
 """
@@ -147,7 +154,7 @@ from zcore import BaseRepository
 from .models import {ModelName}
 from .schemas import {ModelName}Create, {ModelName}Update
 
-class {ModelName}Repository(BaseRepository[{ModelName}]):
+class {ModelNameRepository}(BaseRepository[{ModelName}]):
     def __init__(self, db: AsyncSession):
         super().__init__(model={ModelName}, db=db)
 """

@@ -1,6 +1,12 @@
 """ZCore Framework Core Package Entrypoint."""
 
+import importlib.metadata
 from typing import TYPE_CHECKING, Any
+
+try:
+    __version__ = importlib.metadata.version("fastapi-zcore-framework")
+except Exception:
+    __version__ = "0.1.0-rc.3"
 
 from zcore.config import settings
 
@@ -113,6 +119,7 @@ __all__ = [
     "ZCoreRequest",
     "ZDateTime",
     "Zchema",
+    "__version__",
     "app_exception_handler",
     "background_scope",
     "background_task",
