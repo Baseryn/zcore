@@ -1104,3 +1104,37 @@ async def test_subclassed_router_hook_register_custom_routes() -> None:
         res = await client.get("/items-hook/reports")
         assert res.status_code == 200
         assert res.json() == {"report": "generated"}
+
+
+@pytest.mark.anyio
+async def test_search_endpoint_rejects_conflicting_pagination_params() -> None:
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    service_inst = MockFullService()
+    container.register_singleton(MockFullService, service_inst)
+
+    class ConflictRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = MockFullService
+        prefix = "/conflict-test"
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = ConflictRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/conflict-test/search",
+            json={"page": 3, "cursor": "eyJ2YWx1ZSI6IC...", "size": 10},
+        )
+        assert res.status_code == 422
+        body = res.json()
+        assert body["success"] is False
+        assert "Cannot combine 'cursor' with 'page' > 1" in body["message"]

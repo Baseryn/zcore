@@ -109,6 +109,11 @@ class SearchRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_and_bound_size(self) -> SearchRequest:
+        if self.cursor and self.cursor.strip() and self.page > 1:
+            raise ValueError(
+                "Cannot combine 'cursor' with 'page' > 1. Choose either keyset (cursor) or offset (page) pagination."
+            )
+
         default_size = getattr(settings, "PAGINATION_DEFAULT_SIZE", 20)
         max_size = getattr(settings, "PAGINATION_MAX_SIZE", 100)
 
