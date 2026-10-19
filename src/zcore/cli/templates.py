@@ -154,7 +154,7 @@ from zcore import BaseRepository
 from .models import {ModelName}
 from .schemas import {ModelName}Create, {ModelName}Update
 
-class {ModelNameRepository}(BaseRepository[{ModelName}]):
+class {ModelName}Repository(BaseRepository[{ModelName}]):
     def __init__(self, db: AsyncSession):
         super().__init__(model={ModelName}, db=db)
 """

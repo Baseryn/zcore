@@ -516,9 +516,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
             elif isinstance(key, dict):
                 if self.is_composite_pk:
                     missing = [
-                        col.key
-                        for col in self.pks
-                        if col.key not in key and col.name not in key
+                        col.key for col in self.pks if col.key not in key and col.name not in key
                     ]
                     if missing:
                         raise ValueError(
