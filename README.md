@@ -62,7 +62,7 @@ To examine how these architectural patterns interact in an end-to-end codebase, 
 | Area | Plain FastAPI | Heavy Monoliths (e.g., Django) | FastAPI with ZCore |
 | :--- | :--- | :--- | :--- |
 | **Philosophy** | Minimalist microframework; architectural organization is left entirely to the developer. | Batteries-included, opinionated; coupled to built-in ORM and global application registries. | **Composable layer;** provides structured architectural patterns while keeping routers and schemas standard. |
-| **Field-Level Security** | Manual `if/else` checks or maintaining distinct Pydantic DTOs for each access level. | Model-level field permissions or specialized serializer layers. | **Context-aware pruning (`Zchema`);** dynamically filters restricted fields across validation, serialization, and OpenAPI. |
+| **Field-Level Security** | Manual `if/else` checks or maintaining distinct Pydantic DTOs for each access level. | Model-level field permissions or specialized serializer layers. | **Context-aware pruning (`Zchema`);** dynamically filters restricted fields across validation, serialization, and dynamic schema introspection. |
 | **Transaction Management** | Manual `session.commit()` calls across routes and services; potential for partial writes. | Built-in transaction blocks (`transaction.atomic()`). | **Re-entrant `UnitOfWork`;** depth-aware coordination with domain events buffered until root commit succeeds. |
 | **Background Processing** | Request-scoped sessions passed to `BackgroundTasks` often encounter closed session errors. | Relies on external task queue workers (e.g., Celery) even for simple background steps. | **Scoped `@background_task`;** isolates session allocation and IoC lifecycles from completed request scopes. |
 | **Modular Domain Design** | Standard `APIRouter` instances; vulnerable to circular imports as features expand. | Strict app layout and global settings configuration. | **DAG-driven `Plugin` system;** topological startup sorting and pure Python Protocol contracts for interface decoupling. |
@@ -122,7 +122,7 @@ The application starts at `http://127.0.0.1:8000` with 8 standard endpoints mana
 * `POST /tasks/lookup` — Lightweight, column-projected endpoint for relational references
 * `PUT /tasks/{id}` & `PATCH /tasks/{id}` — Complete and partial updates
 * `DELETE /tasks/{id}` — Soft delete (or physical purge via `?force=true`)
-* `GET /tasks/?schema=true` — Dynamic role-aware schema introspection
+* `GET /tasks/_schema` — Role-aware schema introspection (all actions or filtered via `?action=create|update|view|lookup`)
 
 ---
 
@@ -138,7 +138,7 @@ Managing multiple versions of the same schema (`ProductCustomerView`, `ProductIn
 Define the schema once by inheriting from `Zchema`. When fields are marked as restricted within the current request context (`ctx.restricted_fields`), ZCore prunes them across:
 1. **Input validation:** Silently discards restricted fields to prevent mass assignment.
 2. **Output serialization:** Removes restricted attributes before JSON encoding.
-3. **OpenAPI generation:** Omit restricted properties from documentation and dynamic `?schema=true` requests.
+3. **Schema introspection:** Omits restricted properties dynamically when querying the `/_schema` endpoint.
 
 ```python
 import uuid

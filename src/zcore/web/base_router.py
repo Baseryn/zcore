@@ -1,9 +1,11 @@
 """Automated Web Router Scaffolding.
 
 This module provides the generic `BaseRouter` interface, which scaffolds
-standard security-aware CRUD and lookup endpoints (POST, GET, GET_ALL, SEARCH, LOOKUP, UPDATE, PATCH, DELETE)
+standard security-aware CRUD, lookup, and schema introspection endpoints
+(POST, GET, GET_ALL, SEARCH, LOOKUP, UPDATE, PATCH, DELETE, SCHEMA)
 and integrates them with services, schemas, dependency requirements, and pagination handlers,
-with clean declarative syntax, primary key auto-detection, and weighted route specificity sorting.
+with clean declarative syntax, primary key auto-detection, optional authentication,
+and weighted route specificity sorting.
 """
 
 import uuid
@@ -18,9 +20,11 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import joinedload, selectinload
 
 from zcore.config import settings
+from zcore.context.context import ctx
 from zcore.db.search import SearchRequest
 from zcore.exceptions.base import ValidationError
 from zcore.kernel.di import Injector
+from zcore.security.dependencies import get_optional_user_stub
 from zcore.security.permissions import HasScopes
 from zcore.service.base import BaseService
 from zcore.web.api_router import ZCoreAPIRoute
@@ -44,14 +48,15 @@ class RouteKey(StrEnum):
     UPDATE = "UPDATE"
     PATCH = "PATCH"
     DELETE = "DELETE"
+    SCHEMA = "SCHEMA"
 
 
 class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     """Declarative web router orchestrator.
 
-    Automatically maps CRUD and lookup operations to matching database model dependencies and handles
-    dependency injections, schema validations, dynamic primary key route resolution,
-    and hierarchical route ordering based on path specificity.
+    Automatically maps CRUD, lookup, and schema introspection operations to matching database
+    model dependencies and handles dependency injections, schema validations, dynamic primary
+    key route resolution, and hierarchical route ordering based on path specificity.
 
     Attributes:
         model: The database declarative model class.
@@ -66,11 +71,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         service: Business service callable class.
         pk_type: Optional explicit primary key type. If None, auto-resolved from model metadata.
         prefix: Path prefix representing the route.
+        schema_path: Sub-path reserved for resource schema introspection. Defaults to "/_schema".
         tags: Endpoint group classification tags.
         exclude: Explicit endpoints to bypass during route scaffolding.
         pagination_class: Pagination engine class to construct list queries.
         route_class: Custom routing processing class. Defaults to ZCoreAPIRoute.
-        expose_schemas: Exposes target endpoint schemas dynamically.
     """
 
     model: type[Any]
@@ -86,12 +91,11 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
     pk_type: type[Any] | None = None
 
     prefix: str = ""
+    schema_path: str = "/_schema"
     tags: list[str] | None = None
     exclude: set[RouteKey] | None = None
     pagination_class: type["BasePagination"] | None = None
     route_class: type[APIRoute] = ZCoreAPIRoute
-
-    expose_schemas: set[RouteKey] | bool = False
 
     def __init__(self) -> None:
         """Initialize the BaseRouter.
@@ -192,24 +196,6 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                     f"Model class must be defined in '{self.__class__.__name__}' to resolve route actions."
                 )
 
-    def _get_openapi_extra(self, route_key: RouteKey) -> dict[str, Any] | None:
-        """Construct OpenAPI specifications for dynamic schema endpoints.
-
-        Args:
-            route_key: Target operational key to check.
-
-        Returns:
-            An openapi metadata dictionary, or None.
-        """
-        if isinstance(self.expose_schemas, bool):
-            expose = self.expose_schemas
-        else:
-            expose = route_key in (self.expose_schemas or set())
-
-        if expose:
-            return {"expose_schema": True}
-        return None
-
     def _normalize_dependencies(self, raw_deps: list[Any] | Any) -> list[DependsClass]:
         """Normalize raw classes or parameters into FastAPI Depends structures.
 
@@ -240,7 +226,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             route_key: The target operational key.
 
         Returns:
-            The calculated permission action identifier string.
+            The calculated permission action identifier string, or an empty string.
         """
         if not self.model:
             raise ValueError(
@@ -257,10 +243,10 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
             RouteKey.PATCH: self.model.actions().UPDATE,
             RouteKey.DELETE: self.model.actions().DELETE,
         }
-        return action_map[route_key]
+        return action_map.get(route_key, "")
 
     def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
-        """Generate default route dependencies.
+        """Generate route dependencies supporting mandatory or optional authorization.
 
         Args:
             route_key: The target operational route key.
@@ -269,6 +255,9 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         Returns:
             A list of dependencies.
         """
+        if route_key == RouteKey.SCHEMA:
+            return [get_optional_user_stub]
+
         if not action:
             return []
         return [HasScopes(action)]
@@ -424,6 +413,22 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
         target_pk_type = self._resolve_pk_type()
         pk_path = self._get_pk_path(target_pk_type)
 
+        if RouteKey.SCHEMA not in self.exclude:
+
+            async def _schema_endpoint(
+                action: str | None = None,
+            ) -> ResponseWrapper:
+                return await self.schema_endpoint(action)
+
+            self.router.add_api_route(
+                path=self.schema_path,
+                endpoint=_schema_endpoint,
+                methods=["GET"],
+                dependencies=self._get_route_dependencies(RouteKey.SCHEMA),
+                status_code=status.HTTP_200_OK,
+                response_model=ResponseWrapper,
+            )
+
         if RouteKey.POST not in self.exclude:
             c_schema = self.create_schema
 
@@ -442,7 +447,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[self.schema_out]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.POST),
+                openapi_extra={"action": "create"},
             )
 
         if RouteKey.GET not in self.exclude:
@@ -462,7 +467,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[self.schema_out]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.GET),
+                openapi_extra={"action": "view"},
             )
 
         if RouteKey.GET_ALL not in self.exclude:
@@ -490,7 +495,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[list[self.schema_out]]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.GET_ALL),
+                openapi_extra={"action": "listview"},
             )
 
         if RouteKey.SEARCH not in self.exclude:
@@ -510,7 +515,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[list[self.schema_out]]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.SEARCH),
+                openapi_extra={"action": "listview"},
             )
 
         if RouteKey.LOOKUP not in self.exclude and self.lookup_schema is not None:
@@ -528,7 +533,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 dependencies=self._get_route_dependencies(RouteKey.LOOKUP),
                 status_code=status.HTTP_200_OK,
                 response_model=ResponseWrapper[list[self.lookup_schema]],
-                openapi_extra=self._get_openapi_extra(RouteKey.LOOKUP),
+                openapi_extra={"action": "lookup"},
             )
 
         if RouteKey.UPDATE not in self.exclude:
@@ -550,7 +555,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[self.schema_out]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.UPDATE),
+                openapi_extra={"action": "update"},
             )
 
         if RouteKey.PATCH not in self.exclude:
@@ -572,7 +577,7 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 response_model=ResponseWrapper[self.schema_out]
                 if self.schema_out
                 else ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.PATCH),
+                openapi_extra={"action": "update"},
             )
 
         if RouteKey.DELETE not in self.exclude:
@@ -591,11 +596,67 @@ class BaseRouter(Generic[CreateSchemaType, UpdateSchemaType]):
                 dependencies=self._get_route_dependencies(RouteKey.DELETE),
                 status_code=status.HTTP_200_OK,
                 response_model=ResponseWrapper,
-                openapi_extra=self._get_openapi_extra(RouteKey.DELETE),
+                openapi_extra={"action": "delete"},
             )
 
         self.register_custom_routes()
         self._sort_routes()
+
+    async def schema_endpoint(self, action: str | None = None) -> ResponseWrapper:
+        """Resolve dynamic model JSON schemas pruned according to active security context.
+
+        Args:
+            action: Specific action schema identifier ('create', 'update', 'view', 'lookup').
+                If omitted, returns all available schemas for this resource.
+
+        Returns:
+            ResponseWrapper containing the resolved schema or schema mapping.
+
+        Raises:
+            ValidationError: If an invalid action or unconfigured schema is requested.
+        """
+        schemas: dict[str, type[BaseModel] | None] = {
+            "create": self.create_schema,
+            "update": self.update_schema,
+            "view": self.schema_out,
+            "lookup": self.lookup_schema,
+        }
+
+        if action:
+            normalized_action = action.lower().strip()
+            if normalized_action not in schemas:
+                allowed = ", ".join(sorted(schemas.keys()))
+                raise ValidationError(
+                    message=f"Invalid schema action '{action}'. Allowed actions are: {allowed}"
+                )
+
+            target_schema = schemas[normalized_action]
+            if target_schema is None:
+                raise ValidationError(
+                    message=f"No schema configured for action '{action}' on {self.__class__.__name__}."
+                )
+
+            with ctx.scope(action=normalized_action):
+                schema_data = target_schema.model_json_schema()
+
+            return ResponseWrapper(
+                data=schema_data,
+                meta={
+                    "action": normalized_action,
+                    "restricted_fields": list(ctx.restricted_fields),
+                },
+            )
+
+        resolved_schemas: dict[str, Any] = {}
+        for act_name, schema_cls in schemas.items():
+            if schema_cls is not None:
+                with ctx.scope(action=act_name):
+                    resolved_schemas[act_name] = schema_cls.model_json_schema()
+
+        return ResponseWrapper(
+            data=resolved_schemas,
+            meta={"restricted_fields": list(ctx.restricted_fields)},
+        )
 
     async def create_endpoint(self, data_in: Any, service: BaseService) -> ResponseWrapper:
         """Execute the POST creation transaction.

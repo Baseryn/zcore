@@ -290,7 +290,6 @@ async def test_router_schema_projection_pruning(
         schema_out = DummyOut
         service = TargetService
         prefix = "/items"
-        expose_schemas = True
 
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
@@ -307,7 +306,7 @@ async def test_router_schema_projection_pruning(
         for header in expected_vary:
             assert header.lower() in vary_header.lower()
         if expected_vary:
-            schema_resp = await client.get("/items/?schema=true")
+            schema_resp = await client.get("/items/_schema?action=view")
             assert schema_resp.status_code == 200
             schema_data = schema_resp.json()
             assert "password" not in schema_data["data"]["properties"]
@@ -511,11 +510,12 @@ async def test_zchema_wildcard_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_router_schema_introspection_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.password"}))
     )
     app = FastAPI()
+    register_exception_handlers(app)
 
     class ExposureRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
@@ -524,7 +524,6 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         schema_out = DummyOut
         service = MockFullService
         prefix = "/exposure"
-        expose_schemas = True
 
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
@@ -533,12 +532,57 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
     app.include_router(r.router)
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res_post = await client.post("/exposure/?schema=true")
-        assert res_post.status_code == 200
-        assert "name" in res_post.json()["data"]["properties"]
-        res_get = await client.get("/exposure/12345678-1234-5678-1234-567812345678?schema=true")
-        assert res_get.status_code == 200
-        assert "password" not in res_get.json()["data"]["properties"]
+        # 1. Action-specific introspection: CREATE
+        res_create = await client.get("/exposure/_schema?action=create")
+        assert res_create.status_code == 200
+        create_json = res_create.json()
+        assert create_json["success"] is True
+        assert "name" in create_json["data"]["properties"]
+        assert create_json["meta"]["action"] == "create"
+
+        # 2. Action-specific introspection: VIEW (restricted password must be pruned)
+        res_view = await client.get("/exposure/_schema?action=view")
+        assert res_view.status_code == 200
+        view_json = res_view.json()
+        assert view_json["success"] is True
+        assert "name" in view_json["data"]["properties"]
+        assert "password" not in view_json["data"]["properties"]
+
+        # 3. Full resource introspection: No action query parameter
+        res_all = await client.get("/exposure/_schema")
+        assert res_all.status_code == 200
+        all_json = res_all.json()
+        assert all_json["success"] is True
+        assert "create" in all_json["data"]
+        assert "view" in all_json["data"]
+        assert "update" in all_json["data"]
+        assert "password" not in all_json["data"]["view"]["properties"]
+
+        # 4. Invalid action must yield 400 ValidationError
+        res_invalid = await client.get("/exposure/_schema?action=non_existing_action")
+        assert res_invalid.status_code == 400
+        invalid_json = res_invalid.json()
+        assert invalid_json["success"] is False
+        assert "Invalid schema action" in invalid_json["message"]
+
+
+@pytest.mark.anyio
+async def test_router_schema_endpoint_exclusion() -> None:
+    class ExcludedSchemaRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = MockFullService
+        prefix = "/excluded-schema"
+        exclude: ClassVar[set[RouteKey]] = {RouteKey.SCHEMA}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = ExcludedSchemaRouter()
+    paths = [route.path for route in r.router.routes]
+    assert "/excluded-schema/_schema" not in paths
 
 
 @pytest.mark.anyio
@@ -634,10 +678,13 @@ def test_route_sorting_shadowing() -> None:
     router_inst = SortRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/test/search" in paths
+    assert "/test/_schema" in paths
     assert "/test/{id:uuid}" in paths
     idx_search = paths.index("/test/search")
+    idx_schema = paths.index("/test/_schema")
     idx_uuid = paths.index("/test/{id:uuid}")
     assert idx_search < idx_uuid
+    assert idx_schema < idx_uuid
 
 
 @pytest.mark.anyio
@@ -745,13 +792,16 @@ def test_base_router_weighted_route_specificity_sorting() -> None:
     paths = [r.path for r in router_inst.router.routes]
     assert "/api/items/search" in paths
     assert "/api/items/lookup" in paths
+    assert "/api/items/_schema" in paths
     assert "/api/items/{id:uuid}" in paths
 
     idx_search = paths.index("/api/items/search")
     idx_lookup = paths.index("/api/items/lookup")
+    idx_schema = paths.index("/api/items/_schema")
     idx_dynamic = paths.index("/api/items/{id:uuid}")
     assert idx_search < idx_dynamic
     assert idx_lookup < idx_dynamic
+    assert idx_schema < idx_dynamic
 
 
 def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
