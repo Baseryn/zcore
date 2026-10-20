@@ -571,3 +571,28 @@ async def test_search_numeric_coercion_from_string(db_session: Any, seed_data: N
         req_invalid = SearchRequest(filters=[FilterItem(field="id", op="eq", value="not_a_number")])
         engine.build_base_query(req_invalid)
     assert "failed to coerce" in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(
+    "page, cursor, should_raise",
+    [
+        (1, None, False),
+        (1, "valid_cursor_token", False),
+        (2, None, False),
+        (2, "", False),
+        (2, "   ", False),
+        (2, "valid_cursor_token", True),
+        (5, "valid_cursor_token", True),
+    ],
+)
+def test_search_request_pagination_mutual_exclusivity(
+    page: int, cursor: str | None, should_raise: bool
+) -> None:
+    if should_raise:
+        with pytest.raises(Exception) as exc_info:
+            SearchRequest(page=page, cursor=cursor)
+        assert "Cannot combine 'cursor' with 'page' > 1" in str(exc_info.value)
+    else:
+        req = SearchRequest(page=page, cursor=cursor)
+        assert req.page == page
+        assert req.cursor == cursor

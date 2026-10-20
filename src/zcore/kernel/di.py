@@ -8,6 +8,7 @@ against cyclic dependencies, and coordinates isolated background task execution 
 
 import functools
 import inspect
+import types
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -48,6 +49,14 @@ class CircularDependencyError(DIException):
     pass
 
 
+class _DependencySignature(list[type[Any]]):
+    """Signature mapping preserving list-like inspection while caching parameter names."""
+
+    def __init__(self, kwargs_map: dict[str, type[Any]]) -> None:
+        super().__init__(kwargs_map.values())
+        self.kwargs_map: dict[str, type[Any]] = kwargs_map
+
+
 class IoCContainer:
     """Central Inversion of Control (IoC) container for dependency management.
 
@@ -71,6 +80,50 @@ class IoCContainer:
 
         self._constructor_cache: dict[type[Any], Callable[..., Any] | None] = {}
         self._dependency_signature_cache: dict[type[Any], list[type[Any]]] = {}
+
+    def is_registered(self, interface: type[Any]) -> bool:
+        """Verify if a given interface or class is registered across any lifecycle store.
+
+        Args:
+            interface: The interface or class type to inspect.
+
+        Returns:
+            True if the interface has an active registration, False otherwise.
+        """
+        unwrapped = self._unwrap_type(interface)
+        current_instances = _scoped_instances.get()
+        in_active_scope = current_instances is not None and unwrapped in current_instances
+        return (
+            unwrapped in self._singletons
+            or unwrapped in self._scoped_definitions
+            or unwrapped in self._factories
+            or unwrapped is AsyncSession
+            or in_active_scope
+        )
+
+    @staticmethod
+    def _unwrap_type(annotation: Any) -> Any:
+        """Recursively unwrap Annotated, Optional, and Union types to extract the target type.
+
+        Args:
+            annotation: Raw type annotation to normalize.
+
+        Returns:
+            The extracted concrete dependency type.
+        """
+        origin = get_origin(annotation)
+        if origin is Annotated:
+            return IoCContainer._unwrap_type(get_args(annotation)[0])
+
+        is_union = origin is not None and (
+            origin is types.UnionType or str(origin) in ("typing.Union", "<class 'union'>")
+        )
+        if is_union:
+            args = [arg for arg in get_args(annotation) if arg is not type(None)]
+            if len(args) == 1:
+                return IoCContainer._unwrap_type(args[0])
+
+        return annotation
 
     def register_singleton(self, interface: type[Any], instance: Any) -> None:
         """Register a pre-constructed instance as a global singleton.
@@ -138,27 +191,36 @@ class IoCContainer:
             The fully constructed instance of type `T`.
 
         Raises:
+            DIException: If a scoped dependency is requested outside an active scope.
             CircularDependencyError: If a cyclic loop is detected during dependency tree assembly.
         """
-        if interface in self._singletons:
-            return self._singletons[interface]
+        target_type = self._unwrap_type(interface)
+
+        if target_type in self._singletons:
+            return self._singletons[target_type]
 
         scope_id = _current_scope_id.get()
         if scope_id is not None:
             current_instances = _scoped_instances.get()
-            if current_instances is not None and interface in current_instances:
-                return current_instances[interface]
+            if current_instances is not None and target_type in current_instances:
+                return current_instances[target_type]
 
-            if interface in self._scoped_definitions:
-                resolved_instance = self._scoped_definitions[interface](_stack)
+            if target_type in self._scoped_definitions:
+                resolved_instance = self._scoped_definitions[target_type](_stack)
                 if current_instances is not None:
-                    current_instances[interface] = resolved_instance
+                    current_instances[target_type] = resolved_instance
                 return resolved_instance
+        else:
+            if target_type in self._scoped_definitions or target_type is AsyncSession:
+                type_name = getattr(target_type, "__name__", str(target_type))
+                raise DIException(
+                    f"Cannot resolve scoped dependency '{type_name}' outside of an active scope."
+                )
 
-        if interface in self._factories:
-            return self._factories[interface](_stack)
+        if target_type in self._factories:
+            return self._factories[target_type](_stack)
 
-        return self._auto_wire(interface, _stack)
+        return self._auto_wire(target_type, _stack)
 
     def _auto_wire(self, target_class: type[T], _stack: set[type[Any]] | None = None) -> T:
         """Analyze, resolve parameters, and construct a class instance.
@@ -189,8 +251,14 @@ class IoCContainer:
 
         try:
             if target_class in self._dependency_signature_cache:
-                dependencies = self._dependency_signature_cache[target_class]
-                resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
+                cached_sig = self._dependency_signature_cache[target_class]
+                if isinstance(cached_sig, _DependencySignature):
+                    resolved_kwargs = {
+                        name: self.resolve(dep, _stack.copy())
+                        for name, dep in cached_sig.kwargs_map.items()
+                    }
+                    return target_class(**resolved_kwargs)
+                resolved_args = [self.resolve(dep, _stack.copy()) for dep in cached_sig]
                 return target_class(*resolved_args)
 
             if target_class not in self._constructor_cache:
@@ -200,7 +268,7 @@ class IoCContainer:
                 constructor = self._constructor_cache[target_class]
 
             if constructor is None or constructor is object.__init__:
-                self._dependency_signature_cache[target_class] = []
+                self._dependency_signature_cache[target_class] = _DependencySignature({})
                 return target_class()
 
             try:
@@ -209,24 +277,33 @@ class IoCContainer:
                 type_hints = {}
 
             sig = inspect.signature(constructor)
-            dependencies = []
+            dependencies_map: dict[str, type[Any]] = {}
 
             for name, param in sig.parameters.items():
                 if name == "self":
                     continue
-                annotation = type_hints.get(name, param.annotation)
-                if annotation is inspect.Parameter.empty:
+                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                     continue
 
-                if get_origin(annotation) is Annotated:
-                    annotation = get_args(annotation)[0]
+                raw_annotation = type_hints.get(name, param.annotation)
+                if raw_annotation is inspect.Parameter.empty:
+                    continue
 
-                dependencies.append(annotation)
+                annotation = self._unwrap_type(raw_annotation)
+                has_default = param.default is not inspect.Parameter.empty
 
-            self._dependency_signature_cache[target_class] = dependencies
+                if has_default and not self.is_registered(annotation):
+                    continue
 
-            resolved_args = [self.resolve(dep, _stack.copy()) for dep in dependencies]
-            return target_class(*resolved_args)
+                dependencies_map[name] = annotation
+
+            sig_entry = _DependencySignature(dependencies_map)
+            self._dependency_signature_cache[target_class] = sig_entry
+
+            resolved_kwargs = {
+                name: self.resolve(dep, _stack.copy()) for name, dep in sig_entry.kwargs_map.items()
+            }
+            return target_class(**resolved_kwargs)
 
         finally:
             _stack.remove(target_class)
@@ -380,9 +457,7 @@ def background_task(func: Callable[..., Any]) -> Callable[..., Any]:
             if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                 continue
             if param.annotation is not inspect.Parameter.empty:
-                annotation = param.annotation
-                if get_origin(annotation) is Annotated:
-                    annotation = get_args(annotation)[0]
+                annotation = container._unwrap_type(param.annotation)
                 resolved_kwargs[param_name] = container.resolve(annotation)
 
         return resolved_kwargs

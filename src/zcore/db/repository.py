@@ -3,14 +3,15 @@
 This module provides a Repository pattern implementation for SQLAlchemy
 2.0 and Pydantic V2. It decouples business logic from database interactions by exposing
 highly specialized, reusable interfaces divided into read, write, and search capabilities.
-It supports dynamic pagination, eager load optimization, field pruning, and full soft-delete lifecycles.
+It supports dynamic pagination, eager load optimization, field pruning, composite primary keys,
+and full soft-delete lifecycles.
 """
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Select, delete, func, insert, inspect, select, update
+from sqlalchemy import Select, and_, delete, func, insert, inspect, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.interfaces import ExecutableOption
@@ -34,16 +35,70 @@ class AbstractRepository(Generic[ModelType]):
     Attributes:
         db: The active asynchronous database session.
         model: The SQLAlchemy model class bound to the repository instance.
-        pk: The SQLAlchemy primary key column representation of the bound model.
-        pk_name: The string identifier name of the primary key field.
-        cursor_field: The field name to utilize during keyset pagination lookups.
+        pks: Tuple of primary key column representations of the bound model.
+        pk_names: Tuple of primary key column names.
+        is_composite_pk: Flag indicating if the model has a composite primary key.
     """
 
     db: AsyncSession
     model: type[ModelType]
-    pk: Any
-    pk_name: str
-    cursor_field: str
+    pks: tuple[Any, ...]
+    pk_names: tuple[str, ...]
+    is_composite_pk: bool
+    _cursor_field: str | None = None
+
+    @property
+    def pk(self) -> Any:
+        """Convenience property for single primary key models.
+
+        Raises:
+            AttributeError: If accessed on a composite primary key model.
+        """
+        if self.is_composite_pk:
+            raise AttributeError(
+                f"Model '{self.model.__name__}' has a composite primary key {self.pk_names}. "
+                "Access 'self.pks' instead of 'self.pk'."
+            )
+        return self.pks[0]
+
+    @property
+    def pk_name(self) -> str:
+        """Convenience property for single primary key column name.
+
+        Raises:
+            AttributeError: If accessed on a composite primary key model.
+        """
+        if self.is_composite_pk:
+            raise AttributeError(
+                f"Model '{self.model.__name__}' has a composite primary key {self.pk_names}. "
+                "Access 'self.pk_names' instead of 'self.pk_name'."
+            )
+        return self.pk_names[0]
+
+    @property
+    def cursor_field(self) -> str:
+        """Resolve the default cursor coordinate field.
+
+        Returns:
+            The explicitly configured cursor field or the single primary key column name.
+
+        Raises:
+            AttributeError: If invoked on a composite model without an explicit cursor field.
+        """
+        if self._cursor_field is not None:
+            return self._cursor_field
+
+        if self.is_composite_pk:
+            raise AttributeError(
+                f"Model '{self.model.__name__}' has a composite primary key {self.pk_names}. "
+                "Explicitly set 'self.cursor_field' on the repository or provide sorting criteria in requests."
+            )
+
+        return self.pk_names[0]
+
+    @cursor_field.setter
+    def cursor_field(self, value: str | None) -> None:
+        self._cursor_field = value
 
     def _get_base_query(self) -> Select:
         """Construct the initial select statement for query operations.
@@ -77,6 +132,115 @@ class AbstractRepository(Generic[ModelType]):
             query = query.filter_by(**filters)
         return query
 
+    def _build_pk_condition(self, target: Any) -> Any:
+        """Build equality filter condition for single or composite primary key target.
+
+        Args:
+            target: Model instance, dict mapping column names to values, tuple/list of values, or scalar.
+
+        Returns:
+            SQLAlchemy binary expression or compound `and_` expression matching target primary key.
+
+        Raises:
+            ValueError: If target values do not conform to expected primary key structures.
+        """
+        if isinstance(target, self.model):
+            return and_(*[col == getattr(target, col.key) for col in self.pks])
+
+        if isinstance(target, dict):
+            if self.is_composite_pk:
+                missing = [
+                    col.key for col in self.pks if col.key not in target and col.name not in target
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Incomplete composite primary key mapping for '{self.model.__name__}'. "
+                        f"Missing required key fields: {missing}"
+                    )
+                return and_(*[col == target.get(col.key, target.get(col.name)) for col in self.pks])
+
+            if self.pk_names[0] in target:
+                return self.pks[0] == target[self.pk_names[0]]
+            if self.pks[0].key in target:
+                return self.pks[0] == target[self.pks[0].key]
+            raise ValueError(
+                f"Missing required primary key '{self.pk_names[0]}' in mapping for '{self.model.__name__}'."
+            )
+
+        if isinstance(target, (tuple, list)):
+            if self.is_composite_pk:
+                if len(target) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key tuple for '{self.model.__name__}' requires "
+                        f"{len(self.pks)} values ({self.pk_names}), received {len(target)}."
+                    )
+                return and_(*[col == val for col, val in zip(self.pks, target, strict=True)])
+            return self.pks[0] == target[0]
+
+        if self.is_composite_pk:
+            raise ValueError(
+                f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                f"Target lookup must be a model instance, mapping, or tuple/list, received scalar: {target!r}"
+            )
+
+        return self.pks[0] == target
+
+    def _build_ids_condition(self, ids: Sequence[Any]) -> Any:
+        """Construct matching expression for sequences of scalar or composite primary keys.
+
+        Args:
+            ids: Sequence of scalars, tuples, dicts, or model instances.
+
+        Returns:
+            SQLAlchemy filter expression resolving scalar `in_` or composite `tuple_.in_`.
+
+        Raises:
+            ValueError: If items in ids do not conform to the model's primary key signature.
+        """
+        if not self.is_composite_pk:
+            normalized_scalars = [
+                getattr(item, self.pks[0].key)
+                if isinstance(item, self.model)
+                else item.get(self.pk_names[0], item.get(self.pks[0].key))
+                if isinstance(item, dict)
+                else item[0]
+                if isinstance(item, (tuple, list))
+                else item
+                for item in ids
+            ]
+            return self.pks[0].in_(normalized_scalars)
+
+        normalized_tuples = []
+        for item in ids:
+            if isinstance(item, self.model):
+                normalized_tuples.append(tuple(getattr(item, col.key) for col in self.pks))
+            elif isinstance(item, dict):
+                missing = [
+                    col.key for col in self.pks if col.key not in item and col.name not in item
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Incomplete composite key item in batch for '{self.model.__name__}'. "
+                        f"Missing required fields: {missing}"
+                    )
+                normalized_tuples.append(
+                    tuple(item.get(col.key, item.get(col.name)) for col in self.pks)
+                )
+            elif isinstance(item, (tuple, list)):
+                if len(item) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key item requires {len(self.pks)} values ({self.pk_names}), "
+                        f"received {len(item)}: {item}."
+                    )
+                normalized_tuples.append(tuple(item))
+            else:
+                raise ValueError(
+                    f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                    f"Batch items must be tuples, dicts, or model instances, received scalar: {item!r}"
+                )
+
+        return tuple_(*self.pks).in_(normalized_tuples)
+
     def _supports_soft_delete(self) -> bool:
         """Determine whether the underlying model supports soft deletion.
 
@@ -103,7 +267,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         Returns:
             True if matching records are found, False otherwise.
         """
-        query = select(self.pk)
+        query = select(*self.pks)
         scoper = getattr(self.model, "scope_query", None)
         if scoper:
             query = scoper(query)
@@ -147,7 +311,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         """Fetch a sequence of records matching a list of primary keys.
 
         Args:
-            ids: A list of primary key values to look up.
+            ids: A list of scalar primary keys or composite key tuples/mappings.
             fields: Specific entity fields to selectively load. Defaults to None.
             options: Additional SQLAlchemy executable options. Defaults to None.
 
@@ -157,7 +321,7 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
         if not ids:
             return []
 
-        query = self._get_base_query().where(self.pk.in_(ids))
+        query = self._get_base_query().where(self._build_ids_condition(ids))
         if fields:
             query = query.options(load_only(*fields))
         if options:
@@ -197,7 +361,10 @@ class ReadRepositoryMixin(AbstractRepository[ModelType]):
             return result.scalars().all()
 
         paginator = (
-            CursorPagination(self.cursor_field)
+            CursorPagination(
+                cursor_field=getattr(pagination, "cursor_field", None) or self.cursor_field,
+                order=getattr(pagination, "order", None) or "desc",
+            )
             if isinstance(pagination, CursorParams)
             else PageNumberPagination()
         )
@@ -287,10 +454,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         partial: bool = False,
         **extra_data: Any,
     ) -> ModelType | None:
-        """Update an existing database record from a model instance or primary key.
+        """Update an existing database record from a model instance, primary key, or composite mapping.
 
         Args:
-            target: The model instance or primary key identifier of the record to update.
+            target: Model instance, primary key identifier, composite tuple, or composite mapping.
             schema: The Pydantic update schema containing modified parameters.
             partial: If True, applies modifications as a partial patch (ignoring unset fields).
                 If False, updates the record using all fields. Defaults to False.
@@ -302,7 +469,8 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if isinstance(target, self.model):
             record = target
         else:
-            record = await self.get(**{self.pk_name: target})
+            condition = self._build_pk_condition(target)
+            record = await self.get(condition)
             if not record:
                 return None
 
@@ -320,10 +488,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         partial: bool = False,
         refresh: bool = False,
     ) -> Sequence[ModelType]:
-        """Bulk update multiple database records using DBAPI executemany.
+        """Bulk update multiple database records supporting single or composite keys.
 
         Args:
-            data: A mapping of model instances or primary keys to their update schemas.
+            data: A mapping of model instances, scalar keys, tuples, or dicts to their update schemas.
             partial: If True, ignores unset schema fields. Defaults to False.
             refresh: Parameter maintained for interface consistency. Defaults to False.
 
@@ -336,14 +504,52 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         payloads = []
         target_ids = []
         for key, schema in data.items():
-            pk_val = getattr(key, self.pk_name, key)
-            target_ids.append(pk_val)
-            payloads.append(
-                {
-                    **schema.model_dump(exclude_unset=partial),
-                    self.pk_name: pk_val,
-                }
-            )
+            row_payload = schema.model_dump(exclude_unset=partial)
+            if isinstance(key, self.model):
+                target_id = (
+                    tuple(getattr(key, col.key) for col in self.pks)
+                    if self.is_composite_pk
+                    else getattr(key, self.pk_names[0])
+                )
+                for col in self.pks:
+                    row_payload[col.key] = getattr(key, col.key)
+            elif isinstance(key, dict):
+                if self.is_composite_pk:
+                    missing = [
+                        col.key for col in self.pks if col.key not in key and col.name not in key
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"Incomplete composite primary key mapping in update_multi for '{self.model.__name__}'. "
+                            f"Missing fields: {missing}"
+                        )
+                    target_id = tuple(key.get(col.key, key.get(col.name)) for col in self.pks)
+                    for col in self.pks:
+                        row_payload[col.key] = key.get(col.key, key.get(col.name))
+                else:
+                    pk_k = self.pk_names[0] if self.pk_names[0] in key else self.pks[0].key
+                    target_id = key.get(pk_k)
+                    row_payload[self.pk_names[0]] = target_id
+            elif isinstance(key, (tuple, list)) and self.is_composite_pk:
+                if len(key) != len(self.pks):
+                    raise ValueError(
+                        f"Composite primary key tuple in update_multi requires {len(self.pks)} values ({self.pk_names}), "
+                        f"received {len(key)}."
+                    )
+                target_id = tuple(key)
+                for col, val in zip(self.pks, key, strict=True):
+                    row_payload[col.key] = val
+            else:
+                if self.is_composite_pk:
+                    raise ValueError(
+                        f"Model '{self.model.__name__}' has composite primary keys {self.pk_names}. "
+                        f"Update target must be a tuple, dict, or model instance, received scalar: {key!r}"
+                    )
+                target_id = key
+                row_payload[self.pk_names[0]] = key
+
+            target_ids.append(target_id)
+            payloads.append(row_payload)
 
         await self.db.execute(
             update(self.model),
@@ -354,10 +560,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return await self.get_by_ids(ids=target_ids)
 
     async def delete(self, target: ModelType | Any, force: bool = False) -> ModelType | None:
-        """Delete a single record, applying soft deletion if supported unless forced.
+        """Delete a single record supporting single and composite primary keys.
 
         Args:
-            target: The model instance or primary key identifier of the record to delete.
+            target: Model instance, primary key identifier, composite tuple, or composite mapping.
             force: If True, executes a permanent physical hard deletion. Defaults to False.
 
         Returns:
@@ -366,12 +572,13 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if isinstance(target, self.model):
             record = target
         else:
+            condition = self._build_pk_condition(target)
             if force:
-                query = select(self.model).where(getattr(self.model, self.pk_name) == target)
+                query = select(self.model).where(condition)
                 result = await self.db.execute(query)
                 record = result.scalars().first()
             else:
-                record = await self.get(**{self.pk_name: target})
+                record = await self.get(condition)
 
             if not record:
                 return None
@@ -387,10 +594,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def delete_multi(self, ids: list[Any], force: bool = False) -> Sequence[ModelType]:
-        """Delete multiple records by primary keys, using atomic soft update or hard delete.
+        """Delete multiple records by primary keys supporting single and composite entities.
 
         Args:
-            ids: A list of primary key values of records to delete.
+            ids: List of primary keys, composite tuples, mappings, or model instances.
             force: If True, executes permanent physical hard deletions. Defaults to False.
 
         Returns:
@@ -401,13 +608,14 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
         supports_returning = bool(getattr(dialect, "delete_returning", False))
+        ids_condition = self._build_ids_condition(ids)
 
         if not force and self._supports_soft_delete():
             supports_update_returning = bool(getattr(dialect, "update_returning", False))
             deletion_time = now()
             stmt = (
                 update(self.model)
-                .where(self.pk.in_(ids), self.model.deleted_at.is_(None))
+                .where(ids_condition, self.model.deleted_at.is_(None))
                 .values(deleted_at=deletion_time)
             )
 
@@ -419,30 +627,30 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
             await self.db.execute(stmt)
             await self.db.flush()
-            query = select(self.model).where(self.pk.in_(ids))
+            query = select(self.model).where(ids_condition)
             res = await self.db.execute(query)
             return list(res.scalars().all())
 
         if supports_returning:
-            stmt = delete(self.model).where(self.pk.in_(ids)).returning(self.model)
+            stmt = delete(self.model).where(ids_condition).returning(self.model)
             result = await self.db.scalars(stmt)
             await self.db.flush()
             return list(result.all())
         else:
-            query = select(self.model).where(self.pk.in_(ids))
+            query = select(self.model).where(ids_condition)
             records_res = await self.db.execute(query)
             records = list(records_res.scalars().all())
             if records:
-                stmt = delete(self.model).where(self.pk.in_(ids))
+                stmt = delete(self.model).where(ids_condition)
                 await self.db.execute(stmt)
                 await self.db.flush()
             return records
 
     async def restore(self, target: ModelType | Any) -> ModelType | None:
-        """Restore a previously soft-deleted record.
+        """Restore a previously soft-deleted record supporting single and composite entities.
 
         Args:
-            target: The model instance or primary key identifier of the record to restore.
+            target: Model instance, primary key identifier, composite tuple, or composite mapping.
 
         Returns:
             The restored database model instance, or None if the record was not found or unsupported.
@@ -453,7 +661,8 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         if isinstance(target, self.model):
             record = target
         else:
-            query = select(self.model).where(getattr(self.model, self.pk_name) == target)
+            condition = self._build_pk_condition(target)
+            query = select(self.model).where(condition)
             result = await self.db.execute(query)
             record = result.scalars().first()
             if not record:
@@ -465,10 +674,10 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
         return record
 
     async def restore_multi(self, ids: list[Any]) -> Sequence[ModelType]:
-        """Restore multiple soft-deleted records using an atomic batch update.
+        """Restore multiple soft-deleted records supporting single and composite entities.
 
         Args:
-            ids: A list of primary key values of records to restore.
+            ids: List of primary keys, composite tuples, mappings, or model instances.
 
         Returns:
             A sequence of restored database model instances.
@@ -478,10 +687,11 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         dialect = getattr(getattr(self.db, "bind", None), "dialect", None)
         supports_update_returning = bool(getattr(dialect, "update_returning", False))
+        ids_condition = self._build_ids_condition(ids)
 
         stmt = (
             update(self.model)
-            .where(self.pk.in_(ids), self.model.deleted_at.is_not(None))
+            .where(ids_condition, self.model.deleted_at.is_not(None))
             .values(deleted_at=None)
         )
 
@@ -493,7 +703,7 @@ class WriteRepositoryMixin(Generic[ModelType], AbstractRepository[ModelType]):
 
         await self.db.execute(stmt)
         await self.db.flush()
-        query = select(self.model).where(self.pk.in_(ids))
+        query = select(self.model).where(ids_condition)
         res = await self.db.execute(query)
         return list(res.scalars().all())
 
@@ -540,11 +750,16 @@ class SearchRepositoryMixin(AbstractRepository[ModelType]):
             result = await self.db.execute(query)
             return result.scalars().all()
 
-        paginator = (
-            CursorPagination(self.cursor_field)
-            if isinstance(pagination, CursorParams)
-            else PageNumberPagination()
-        )
+        if isinstance(pagination, CursorParams):
+            primary_sort = search_in.sort[0] if search_in.sort else None
+            sort_field = pagination.cursor_field or (
+                primary_sort.field if primary_sort else self.cursor_field
+            )
+            sort_order = pagination.order or (primary_sort.order if primary_sort else "desc")
+            paginator = CursorPagination(cursor_field=sort_field, order=sort_order)
+        else:
+            paginator = PageNumberPagination()
+
         return await paginator.paginate(self.db, query, pagination, self.model)
 
 
@@ -557,7 +772,7 @@ class BaseRepository(
     """The default implementation combining Read, Write, and Search capabilities."""
 
     def __init__(self, model: type[ModelType], db: AsyncSession):
-        """Initialize the BaseRepository.
+        """Initialize the BaseRepository supporting single and composite primary keys.
 
         Args:
             model: The SQLAlchemy declarative model class linked to this repository.
@@ -565,6 +780,8 @@ class BaseRepository(
         """
         self.model = model
         self.db = db
-        self.pk = inspect(self.model).primary_key[0]
-        self.pk_name = self.pk.name
-        self.cursor_field = self.pk_name
+        mapper = inspect(self.model)
+        self.pks = tuple(mapper.primary_key)
+        self.pk_names = tuple(col.name for col in self.pks)
+        self.is_composite_pk = len(self.pks) > 1
+        self._cursor_field = None
