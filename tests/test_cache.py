@@ -326,27 +326,39 @@ def test_dynamic_cache_configuration_bindings() -> None:
 
 
 @pytest.mark.anyio
-async def test_concurrent_ensure_eviction_task_single_instance() -> None:
+async def test_ensure_eviction_task_concurrent_thread_safety(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import concurrent.futures
+
     await close_cache()
+    monkeypatch.setattr(base_module, "_eviction_task", None)
+
+    created_tasks = []
+    original_create_task = asyncio.get_running_loop().create_task
+
+    def tracked_create_task(coro: Any) -> Any:
+        task = original_create_task(coro)
+        created_tasks.append(task)
+        return task
 
     loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "create_task", tracked_create_task)
 
-    def call_ensure() -> None:
-        loop.call_soon_threadsafe(_ensure_eviction_task)
+    num_threads = 20
+    barrier = threading.Barrier(num_threads)
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(call_ensure) for _ in range(20)]
-        for f in futures:
-            f.result()
+    def worker() -> None:
+        barrier.wait()
+        _ensure_eviction_task()
 
-    await asyncio.sleep(0.05)
+    with (
+        patch("asyncio.get_running_loop", return_value=loop),
+        concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor,
+    ):
+        futures = [executor.submit(worker) for _ in range(num_threads)]
+        concurrent.futures.wait(futures)
 
-    assert base_module._eviction_task is not None
-    assert not base_module._eviction_task.done()
-
-    initial_task = base_module._eviction_task
-    _ensure_eviction_task()
-    assert base_module._eviction_task is initial_task
-
+    assert len(created_tasks) == 1
+    assert base_module._eviction_task is created_tasks[0]
     await close_cache()
-    assert base_module._eviction_task is None
