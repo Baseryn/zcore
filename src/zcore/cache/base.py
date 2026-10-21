@@ -50,9 +50,7 @@ def _ensure_eviction_task(interval: int | None = None) -> None:
     if _eviction_task is None or _eviction_task.done():
         with _eviction_lock:
             if _eviction_task is None or _eviction_task.done():
-                _eviction_task = loop.create_task(
-                    _start_eviction_loop(interval=effective_interval)
-                )
+                _eviction_task = loop.create_task(_start_eviction_loop(interval=effective_interval))
 
 
 def init_cache(redis_url: str | None = None, **kwargs: Any) -> None:
