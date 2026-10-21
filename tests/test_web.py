@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zcore.config import settings
 from zcore.context.context import ZContext, ctx
-from zcore.db.pagination import PageNumberPagination, PageNumberParams, PaginatedResult
+from zcore.db.pagination import (
+    CursorPagination,
+    PageNumberPagination,
+    PageNumberParams,
+    PaginatedResult,
+)
 from zcore.db.setup import Base, db_manager
 from zcore.exceptions.base import AppException, EntityNotFound
 from zcore.exceptions.handlers import app_exception_handler, register_exception_handlers
@@ -83,6 +88,44 @@ class PrivateFieldModel(Zchema):
     name: str
     cost_price: float = 0.0
     internal_notes: str | None = None
+
+
+class SearchCursorItem(Zchema):
+    __model__ = "cursor_dummy"
+    id: str
+    code: int
+    tag: str
+
+
+class MockCursorSearchService:
+    def __init__(self) -> None:
+        self.items = [
+            SearchCursorItem(
+                id=f"10000000-0000-0000-0000-00000000000{i}", code=i * 10, tag=f"tag_{i}"
+            )
+            for i in range(5)
+        ]
+
+    async def search(
+        self,
+        search_in: Any,
+        pagination: Any = None,
+        fields: Any = None,
+        options: Any = None,
+    ) -> Any:
+        order = search_in.sort[0].order if search_in.sort else "desc"
+        sorted_items = sorted(self.items, key=lambda x: x.code, reverse=(order == "desc"))
+        size = pagination.size if pagination else len(sorted_items)
+        data = sorted_items[:size]
+        has_more = len(sorted_items) > size
+        return PaginatedResult(
+            data=data,
+            meta={
+                "next_cursor": "eyJ2YWx1ZSI6IDIwfQ" if has_more else None,
+                "has_more": has_more,
+                "size": size,
+            },
+        )
 
 
 class TargetService:
@@ -247,7 +290,6 @@ async def test_router_schema_projection_pruning(
         schema_out = DummyOut
         service = TargetService
         prefix = "/items"
-        expose_schemas = True
 
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
@@ -264,7 +306,7 @@ async def test_router_schema_projection_pruning(
         for header in expected_vary:
             assert header.lower() in vary_header.lower()
         if expected_vary:
-            schema_resp = await client.get("/items/?schema=true")
+            schema_resp = await client.get("/items/_schema?action=view")
             assert schema_resp.status_code == 200
             schema_data = schema_resp.json()
             assert "password" not in schema_data["data"]["properties"]
@@ -468,11 +510,12 @@ async def test_zchema_wildcard_pruning(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_router_schema_introspection_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ZContext, "restricted_fields", property(lambda self: frozenset({"dummy.password"}))
     )
     app = FastAPI()
+    register_exception_handlers(app)
 
     class ExposureRouter(BaseRouter[DummyCreate, DummyUpdate]):
         model = DummyModel
@@ -481,7 +524,6 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
         schema_out = DummyOut
         service = MockFullService
         prefix = "/exposure"
-        expose_schemas = True
 
         def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
             return []
@@ -490,12 +532,57 @@ async def test_method_schema_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
     app.include_router(r.router)
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res_post = await client.post("/exposure/?schema=true")
-        assert res_post.status_code == 200
-        assert "name" in res_post.json()["data"]["properties"]
-        res_get = await client.get("/exposure/12345678-1234-5678-1234-567812345678?schema=true")
-        assert res_get.status_code == 200
-        assert "password" not in res_get.json()["data"]["properties"]
+        # 1. Action-specific introspection: CREATE
+        res_create = await client.get("/exposure/_schema?action=create")
+        assert res_create.status_code == 200
+        create_json = res_create.json()
+        assert create_json["success"] is True
+        assert "name" in create_json["data"]["properties"]
+        assert create_json["meta"]["action"] == "create"
+
+        # 2. Action-specific introspection: VIEW (restricted password must be pruned)
+        res_view = await client.get("/exposure/_schema?action=view")
+        assert res_view.status_code == 200
+        view_json = res_view.json()
+        assert view_json["success"] is True
+        assert "name" in view_json["data"]["properties"]
+        assert "password" not in view_json["data"]["properties"]
+
+        # 3. Full resource introspection: No action query parameter
+        res_all = await client.get("/exposure/_schema")
+        assert res_all.status_code == 200
+        all_json = res_all.json()
+        assert all_json["success"] is True
+        assert "create" in all_json["data"]
+        assert "view" in all_json["data"]
+        assert "update" in all_json["data"]
+        assert "password" not in all_json["data"]["view"]["properties"]
+
+        # 4. Invalid action must yield 400 ValidationError
+        res_invalid = await client.get("/exposure/_schema?action=non_existing_action")
+        assert res_invalid.status_code == 400
+        invalid_json = res_invalid.json()
+        assert invalid_json["success"] is False
+        assert "Invalid schema action" in invalid_json["message"]
+
+
+@pytest.mark.anyio
+async def test_router_schema_endpoint_exclusion() -> None:
+    class ExcludedSchemaRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = MockFullService
+        prefix = "/excluded-schema"
+        exclude: ClassVar[set[RouteKey]] = {RouteKey.SCHEMA}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = ExcludedSchemaRouter()
+    paths = [route.path for route in r.router.routes]
+    assert "/excluded-schema/_schema" not in paths
 
 
 @pytest.mark.anyio
@@ -591,10 +678,13 @@ def test_route_sorting_shadowing() -> None:
     router_inst = SortRouter()
     paths = [r.path for r in router_inst.router.routes]
     assert "/test/search" in paths
+    assert "/test/_schema" in paths
     assert "/test/{id:uuid}" in paths
     idx_search = paths.index("/test/search")
+    idx_schema = paths.index("/test/_schema")
     idx_uuid = paths.index("/test/{id:uuid}")
     assert idx_search < idx_uuid
+    assert idx_schema < idx_uuid
 
 
 @pytest.mark.anyio
@@ -702,13 +792,16 @@ def test_base_router_weighted_route_specificity_sorting() -> None:
     paths = [r.path for r in router_inst.router.routes]
     assert "/api/items/search" in paths
     assert "/api/items/lookup" in paths
+    assert "/api/items/_schema" in paths
     assert "/api/items/{id:uuid}" in paths
 
     idx_search = paths.index("/api/items/search")
     idx_lookup = paths.index("/api/items/lookup")
+    idx_schema = paths.index("/api/items/_schema")
     idx_dynamic = paths.index("/api/items/{id:uuid}")
     assert idx_search < idx_dynamic
     assert idx_lookup < idx_dynamic
+    assert idx_schema < idx_dynamic
 
 
 def test_zchema_timezone_serialization_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -921,3 +1014,177 @@ def test_zchema_private_fields_input_filtering_for_guest() -> None:
     assert "cost_price" not in filtered
     assert "internal_notes" not in filtered
     assert filtered["name"] == "ItemA"
+
+
+@pytest.mark.anyio
+async def test_router_search_with_cursor_pagination_and_sort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_add_api_route = APIRouter.add_api_route
+
+    def patched_add_api_route(
+        self: Any, path: Any, endpoint: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        return original_add_api_route(
+            self, path, clean_endpoint_signature(endpoint), *args, **kwargs
+        )
+
+    monkeypatch.setattr(APIRouter, "add_api_route", patched_add_api_route)
+    app = FastAPI()
+
+    service_inst = MockCursorSearchService()
+    container.register_singleton(MockCursorSearchService, service_inst)
+
+    class CursorSearchRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = SearchCursorItem
+        service = MockCursorSearchService
+        prefix = "/cursor-search"
+        pagination_class = CursorPagination
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = CursorSearchRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        req_payload = {
+            "filters": [],
+            "sort": [{"field": "code", "order": "desc"}],
+            "size": 2,
+        }
+        res = await client.post("/cursor-search/search", json=req_payload)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert len(body["data"]) == 2
+        assert body["meta"]["has_more"] is True
+        assert body["meta"]["next_cursor"] is not None
+
+        next_cursor = body["meta"]["next_cursor"]
+        req_page2 = {
+            "filters": [],
+            "sort": [{"field": "code", "order": "desc"}],
+            "cursor": next_cursor,
+            "size": 2,
+        }
+        res_page2 = await client.post("/cursor-search/search", json=req_page2)
+        assert res_page2.status_code == 200
+        body2 = res_page2.json()
+        assert body2["success"] is True
+        assert len(body2["data"]) == 2
+
+
+@pytest.mark.anyio
+async def test_subclassed_router_custom_route_in_init_avoids_shadowing() -> None:
+    class DummyService:
+        pass
+
+    class SubclassedInitRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/items-init"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.router.add_api_route("/summary", self.summary_endpoint, methods=["GET"])
+
+        async def summary_endpoint(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = SubclassedInitRouter()
+    paths = [route.path for route in r.router.routes]
+    idx_summary = paths.index("/items-init/summary")
+    idx_uuid = paths.index("/items-init/{id:uuid}")
+    assert idx_summary < idx_uuid
+
+    app = FastAPI()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/items-init/summary")
+        assert res.status_code == 200
+        assert res.json() == {"ok": True}
+
+
+@pytest.mark.anyio
+async def test_subclassed_router_hook_register_custom_routes() -> None:
+    class DummyService:
+        pass
+
+    class SubclassedHookRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = DummyService
+        prefix = "/items-hook"
+
+        def register_custom_routes(self) -> None:
+            self.router.add_api_route("/reports", self.reports_endpoint, methods=["GET"])
+
+        async def reports_endpoint(self) -> dict[str, str]:
+            return {"report": "generated"}
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = SubclassedHookRouter()
+    paths = [route.path for route in r.router.routes]
+    idx_reports = paths.index("/items-hook/reports")
+    idx_uuid = paths.index("/items-hook/{id:uuid}")
+    assert idx_reports < idx_uuid
+
+    app = FastAPI()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/items-hook/reports")
+        assert res.status_code == 200
+        assert res.json() == {"report": "generated"}
+
+
+@pytest.mark.anyio
+async def test_search_endpoint_rejects_conflicting_pagination_params() -> None:
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    service_inst = MockFullService()
+    container.register_singleton(MockFullService, service_inst)
+
+    class ConflictRouter(BaseRouter[DummyCreate, DummyUpdate]):
+        model = DummyModel
+        create_schema = DummyCreate
+        update_schema = DummyUpdate
+        schema_out = DummyOut
+        service = MockFullService
+        prefix = "/conflict-test"
+
+        def get_route_dependencies(self, route_key: RouteKey, action: str) -> list[Any]:
+            return []
+
+    r = ConflictRouter()
+    app.include_router(r.router)
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/conflict-test/search",
+            json={"page": 3, "cursor": "eyJ2YWx1ZSI6IC...", "size": 10},
+        )
+        assert res.status_code == 422
+        body = res.json()
+        assert body["success"] is False
+        assert "Cannot combine 'cursor' with 'page' > 1" in body["message"]

@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import threading
 import time
@@ -321,3 +322,42 @@ def test_dynamic_cache_configuration_bindings() -> None:
         base_cache = BaseCache[str](prefix="dynamic")
         assert base_cache._local_cache.maxsize == 42
         assert base_cache.default_ttl == 123
+
+
+@pytest.mark.anyio
+async def test_ensure_eviction_task_concurrent_thread_safety(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import concurrent.futures
+
+    await close_cache()
+    monkeypatch.setattr(base_module, "_eviction_task", None)
+
+    created_tasks = []
+    original_create_task = asyncio.get_running_loop().create_task
+
+    def tracked_create_task(coro: Any) -> Any:
+        task = original_create_task(coro)
+        created_tasks.append(task)
+        return task
+
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "create_task", tracked_create_task)
+
+    num_threads = 20
+    barrier = threading.Barrier(num_threads)
+
+    def worker() -> None:
+        barrier.wait()
+        _ensure_eviction_task()
+
+    with (
+        patch("asyncio.get_running_loop", return_value=loop),
+        concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor,
+    ):
+        futures = [executor.submit(worker) for _ in range(num_threads)]
+        concurrent.futures.wait(futures)
+
+    assert len(created_tasks) == 1
+    assert base_module._eviction_task is created_tasks[0]
+    await close_cache()

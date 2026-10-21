@@ -234,14 +234,20 @@ class DependencyOverride(ZTestFixture):
         self.app = app
         self.stub = stub
         self.override_func = override_func
+        self._had_override: bool = False
+        self._original_override: Any = None
 
     async def setUp(self) -> None:
         """Register the dependency substitution."""
+        self._had_override = self.stub in self.app.dependency_overrides
+        self._original_override = self.app.dependency_overrides.get(self.stub)
         self.app.dependency_overrides[self.stub] = self.override_func
 
     async def tearDown(self) -> None:
-        """Remove the dependency substitution."""
-        if self.stub in self.app.dependency_overrides:
+        """Restore the dependency substitution to its previous state."""
+        if self._had_override:
+            self.app.dependency_overrides[self.stub] = self._original_override
+        elif self.stub in self.app.dependency_overrides:
             del self.app.dependency_overrides[self.stub]
 
 

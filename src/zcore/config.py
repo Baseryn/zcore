@@ -13,7 +13,7 @@ from typing import Any, TypeVar, cast
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from zcore.kernel.di import container
+from zcore.kernel.di import DIException, container
 
 T = TypeVar("T", bound="Settings")
 
@@ -174,6 +174,8 @@ def get_settings(settings_class: type[T] = Settings) -> T:  # type: ignore[assig
         The resolved settings instance of type `T`.
     """
     try:
+        if not container.is_registered(settings_class):
+            raise DIException(f"Settings class {settings_class.__name__} is not initialized.")
         return cast(T, container.resolve(settings_class))
     except Exception:
         settings_inst = settings_class()

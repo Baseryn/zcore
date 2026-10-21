@@ -3,6 +3,8 @@
 from questionary import Style
 from rich.console import Console
 
+from zcore import __version__
+
 console = Console()
 
 ZCORE_PRIMARY = "#10b981"
@@ -29,7 +31,7 @@ def print_banner() -> None:
     console.print()
     console.print(
         f"[bold {ZCORE_PRIMARY}]⚡ ZCore Framework[/bold {ZCORE_PRIMARY}] "
-        f"[dim white]v0.1.0-rc.2[/dim white] "
+        f"[dim white]v{__version__}[/dim white] "
         f"[{ZCORE_MUTED}]• Modern Modular Monolith[/{ZCORE_MUTED}]"
     )
     console.print(f" [dim {ZCORE_MUTED}]FastAPI • SQLAlchemy 2.0 • Pydantic V2[/dim {ZCORE_MUTED}]")

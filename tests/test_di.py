@@ -330,6 +330,73 @@ def test_constructor_annotated_parameters() -> None:
     assert isinstance(resolved.dep, ForwardB)
 
 
+class ClientWithPrimitiveDefaults:
+    def __init__(self, timeout: int = 30, client: Any = None) -> None:
+        self.timeout = timeout
+        self.client = client
+
+
+class ServiceWithDepAndDefaults:
+    def __init__(self, dep: ForwardB, timeout: int = 30, label: str = "default") -> None:
+        self.dep = dep
+        self.timeout = timeout
+        self.label = label
+
+
+class ServiceWithRegisteredDefault:
+    def __init__(self, service: IService | None = None) -> None:
+        self.service = service
+
+
+def test_auto_wire_skips_unregistered_default_parameters() -> None:
+    resolved = container.resolve(ClientWithPrimitiveDefaults)
+    assert isinstance(resolved, ClientWithPrimitiveDefaults)
+    assert resolved.timeout == 30
+    assert resolved.client is None
+    assert container._dependency_signature_cache[ClientWithPrimitiveDefaults] == []
+
+
+def test_auto_wire_resolves_required_and_skips_unregistered_defaults() -> None:
+    resolved = container.resolve(ServiceWithDepAndDefaults)
+    assert isinstance(resolved, ServiceWithDepAndDefaults)
+    assert isinstance(resolved.dep, ForwardB)
+    assert resolved.timeout == 30
+    assert resolved.label == "default"
+    assert container._dependency_signature_cache[ServiceWithDepAndDefaults] == [ForwardB]
+
+
+def test_auto_wire_injects_registered_dependency_even_with_default() -> None:
+    class ServiceWithRegisteredClassDefault:
+        def __init__(self, service: IService = ServiceImpl()) -> None:
+            self.service = service
+
+    registered = AnotherServiceImpl()
+    container.register_singleton(IService, registered)
+    resolved = container.resolve(ServiceWithRegisteredClassDefault)
+    assert resolved.service is registered
+
+
+def test_auto_wire_injects_registered_dependency_with_optional_union() -> None:
+    registered = AnotherServiceImpl()
+    container.register_singleton(IService, registered)
+    resolved = container.resolve(ServiceWithRegisteredDefault)
+    assert resolved.service is registered
+
+
+def test_auto_wire_skips_unregistered_optional_union() -> None:
+    resolved = container.resolve(ServiceWithRegisteredDefault)
+    assert resolved.service is None
+
+
+def test_resolve_scoped_outside_scope_raises_di_exception() -> None:
+    container.register_scoped(IService, ServiceImpl)
+    assert _current_scope_id.get() is None
+    with pytest.raises(DIException, match="outside of an active scope"):
+        container.resolve(IService)
+    with pytest.raises(DIException, match="outside of an active scope"):
+        container.resolve(AsyncSession)
+
+
 def test_clear_scope_explicit() -> None:
     container.register_scoped(IService, ServiceImpl)
     scope_id = "test_clear"
